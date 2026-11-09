@@ -1,0 +1,77 @@
+import { describe, expect, it } from 'vitest'
+import { FsError, VirtualFS } from './vfs'
+
+const root = { name: 'root', role: 'root' as const }
+const ada = { name: 'ada', role: 'guest' as const }
+
+function fs() {
+  return VirtualFS.fromFiles({
+    '/home/owner/about.md': 'v1\n',
+    '/root/README.md': 'secret\n',
+    '/var/guestbook/README.md': 'write here\n',
+  })
+}
+
+describe('vfs', () => {
+  it('hides root files and other guests scratch', () => {
+    const tree = fs()
+    expect(() => tree.read(ada, '/root/README.md')).toThrow(FsError)
+    tree.begin()
+    tree.mkdir(ada, '/tmp/ada')
+    tree.write(ada, '/tmp/ada/note.txt', 'hi')
+    tree.finish()
+    expect(tree.read(ada, '/tmp/ada/note.txt').content).toBe('hi')
+    expect(() => tree.read({ name: 'bob', role: 'guest' }, '/tmp/ada/note.txt')).toThrow(FsError)
+  })
+
+  it('keeps guest writes off the published layer', () => {
+    const tree = fs()
+    tree.begin()
+    tree.mkdir(ada, '/tmp/ada')
+    tree.write(ada, '/var/guestbook/ada.txt', 'hello')
+    const changes = tree.pendingChanges()
+    tree.finish()
+    expect(changes).toEqual([])
+    expect(tree.read(ada, '/var/guestbook/ada.txt').content).toBe('hello')
+    tree.begin()
+    expect(() => tree.write(ada, '/home/owner/about.md', 'nope')).toThrowError(/Permission denied/)
+    tree.abort()
+    expect(tree.read(ada, '/home/owner/about.md').content).toBe('v1\n')
+  })
+
+  it('records an inverse patch when root edits a published file', () => {
+    const tree = fs()
+    tree.begin()
+    tree.write(root, '/home/owner/about.md', 'v2\n')
+    const changes = tree.pendingChanges()
+    const steps = tree.finish()
+    expect(tree.read(root, '/home/owner/about.md').content).toBe('v2\n')
+    expect(changes).toEqual([{ path: '/home/owner/about.md', content: 'v2\n', encoding: 'utf-8' }])
+    expect(steps[0]?.inverseRemote).toEqual({
+      path: '/home/owner/about.md',
+      content: 'v1\n',
+      encoding: 'utf-8',
+    })
+    tree.restoreStep(steps[0]!)
+    expect(tree.read(root, '/home/owner/about.md').content).toBe('v1\n')
+  })
+
+  it('rolls a published delete back to the original text', () => {
+    const tree = fs()
+    tree.begin()
+    tree.remove(root, '/home/owner/about.md')
+    const steps = tree.finish()
+    expect(() => tree.read(root, '/home/owner/about.md')).toThrow(FsError)
+    tree.restoreStep(steps[0]!)
+    expect(tree.read(root, '/home/owner/about.md').content).toBe('v1\n')
+    expect(steps[0]?.inverseRemote?.content).toBe('v1\n')
+  })
+
+  it('refuses guest removal of published guestbook files', () => {
+    const tree = fs()
+    tree.begin()
+    expect(() => tree.remove(ada, '/var/guestbook/README.md')).toThrow(FsError)
+    tree.abort()
+    expect(tree.read(ada, '/var/guestbook/README.md').content).toBe('write here\n')
+  })
+})

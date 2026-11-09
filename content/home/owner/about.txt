@@ -1,0 +1,13 @@
+About
+
+This is a Linux-terminal-style personal homepage, whose operating habits and file organization mimic zsh.
+
+Of course, you can make whatever modifications you like to the files locally — they will not be uploaded to the server.
+
+Also, this terminal is equipped with tmux and vim, you can type help for more detailed information. For PDF or Markdown files, you can use command pdf or md to view them on your browser. Using wget to download it locally.
+
+You can find my notes of interested books and topics in path '/home/owner/notes'. My projects with breif introduction are in path '/home/owner/projects'.
+
+
+
+

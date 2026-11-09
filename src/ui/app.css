@@ -1,0 +1,337 @@
+:root {
+  color-scheme: dark;
+  --bg: #101010;
+  --fg: #d7d7d7;
+  --dim: #8d8d8d;
+  --green: #98c379;
+  --blue: #61afef;
+  --red: #e06c75;
+  --line: #2a2a2a;
+  --active: #7dba6a;
+  --status: #161616;
+  font-family: "Cascadia Mono", "Cascadia Code", "Sarasa Mono SC", "Noto Sans Mono CJK SC",
+    "Source Han Mono", "IBM Plex Mono", Consolas, "Liberation Mono", ui-monospace, monospace;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body { overflow: hidden; }
+
+.screen {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.split.across { flex-direction: row; }
+.split.stack { flex-direction: column; }
+
+.split-child {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.pane {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.pane.active { border-color: var(--active); }
+
+.scroll-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.scroll, .pager {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pager {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  padding: 0 14px 12px;
+}
+
+.prompt {
+  white-space: pre;
+  flex: none;
+}
+
+.user { color: var(--green); }
+.user.root { color: var(--red); }
+.cwd { color: var(--blue); }
+
+.cmd {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  caret-color: #f2f2f2;
+}
+
+.cmd:focus { outline: none; }
+.cmd.secret { -webkit-text-security: disc; }
+
+.ln.err { color: var(--red); }
+.ln.dim, .dim { color: var(--dim); }
+.bold { font-weight: 700; }
+.fg-red { color: #e06c75; }
+.fg-green { color: #98c379; }
+.fg-yellow { color: #e5c07b; }
+.fg-blue { color: #61afef; }
+.fg-magenta { color: #c678dd; }
+.fg-cyan { color: #56b6c2; }
+.fg-white { color: #dcdfe4; }
+
+.status {
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  background: var(--status);
+  color: var(--dim);
+  font-size: 13px;
+  border-top: 1px solid var(--line);
+}
+
+.status-left, .status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.status-left { overflow: hidden; }
+.status-right { flex: none; }
+
+.session { color: var(--green); margin-right: 4px; }
+
+.win, .touch {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.win.on { color: var(--fg); background: #2c2c2c; }
+.touch { display: none; }
+
+@media (pointer: coarse) {
+  .touch { display: inline-flex; }
+}
+
+::selection { background: #264f78; }
+
+.row[hidden],
+.stage[hidden],
+.pager[hidden] {
+  display: none !important;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  outline: none;
+}
+
+.vim-screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.vim-lines {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 0;
+  white-space: pre;
+}
+
+.vim-line { min-height: 1.45em; }
+
+.vim-gutter { color: var(--dim); }
+
+.vim-cursor {
+  background: #d7d7d7;
+  color: #101010;
+}
+
+.vim-visual { background: #264f78; }
+
+.vim-status, .vim-prompt {
+  flex: none;
+  min-height: 1.45em;
+  padding: 0 10px;
+}
+
+.vim-status { background: #1c1c1c; }
+
+.vim-ime {
+  position: absolute;
+  width: 2ch;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font: inherit;
+}
+
+.stage-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--status);
+  border-bottom: 1px solid var(--line);
+}
+
+.stage-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-command { color: var(--dim); }
+
+.stage-close {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.stage-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.stage-pdf {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.stage-doc {
+  max-width: 72ch;
+  margin: 0 auto;
+  padding: 28px 22px 48px;
+  font-family: "Segoe UI", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.stage-doc h1, .stage-doc h2, .stage-doc h3, .stage-doc h4 {
+  line-height: 1.3;
+  margin: 1.4em 0 0.4em;
+}
+
+.stage-doc h1 { font-size: 1.8em; }
+.stage-doc h2 { font-size: 1.4em; }
+.stage-doc p, .stage-doc ul, .stage-doc ol, .stage-doc blockquote, .stage-doc table { margin: 0.7em 0; }
+.stage-doc a { color: var(--blue); }
+.stage-doc code {
+  font-family: ui-monospace, monospace;
+  background: #1c1c1c;
+  padding: 0 0.25em;
+}
+.stage-doc pre {
+  overflow: auto;
+  padding: 12px;
+  background: #1c1c1c;
+}
+.stage-doc pre code { padding: 0; background: transparent; }
+.stage-doc blockquote {
+  margin-left: 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--line);
+  color: var(--dim);
+}
+.stage-doc table { border-collapse: collapse; }
+.stage-doc th, .stage-doc td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+}
