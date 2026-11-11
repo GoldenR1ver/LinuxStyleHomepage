@@ -6,9 +6,14 @@ Of course, you can make whatever modifications you like to the files locally —
 
 Also, this terminal is equipped with tmux and vim, you can type help for more detailed information. For PDF or Markdown files, you can use command pdf or md to view them on your browser. Using wget to download it locally.
 
-.
-├── notes                       notes of interested books and topics
-└── works                       brief introduction of my works
-    ├── projects
-    └── researches
-
+/
+|-- etc
+|-- home
+|   `-- owner
+|       |-- notes               notes of mine on interested books and topics
+|       `-- works               brief introduction of my works
+|-- root
+|   [Permission denied]
+|-- tmp                         you can modify this freely
+`-- var                         
+    `-- guestbook               here to leave me a message!

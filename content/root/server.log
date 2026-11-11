@@ -1,0 +1,23 @@
+2026-11-11 13:08:12.418  INFO  [gateway]  access
+  trace 4f2a9b1c/9c1e77d2   req req_01H9ZQ7K2M   gw-07 @ ap-southeast-1
+  POST /v2/bill/:id/export -> 200   [32m184ms[0m  (ttfb 61 | upstream 118)   20.0KB
+  actor u_8821 (user) · tenant t_44 · ip a1f3c9 · SG · chrome/131
+  action bill.export · outcome ok · tags #billing #bulk
+
+2026-11-11 13:41:07.002  [31mWARN[0m  [gateway]  access
+  trace -/3b8e11ac   req req_01H9ZQ9T4A   gw-07 @ ap-southeast-1
+  GET /v2/admin/keys -> 403   [32m2ms[0m   0.1KB
+  actor anon · ip 0f21dd · country ?? · ua curl/8.4
+  action admin.keys · outcome denied · tags #probe
+  msg "actor_id missing — unauthenticated"
+
+2026-11-11 14:09:27.903  INFO  [gateway]  access
+  trace -/-   req -   gw-07 @ ap-southeast-1
+  GET / -> 200   [32m0ms[0m
+  actor root (svc) · ip ???? · country ?? · ua -
+  action - · outcome ok
+
+- [31m!Hey, how can U get in there?[0m
+
+- [31mOkey, you win... Now you can do everything you want![0m
+
