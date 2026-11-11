@@ -1,5 +1,8 @@
+method to leave me a message:
+
 vim /var/guestbook/your-name.txt
 mail -m "subject"
 mail push
 
-mail add stages every text file in the local guestbook and /tmp/<you>. A piped note can mention another page; that page's contents are not attached.
+mail add stages every text file in the local guestbook and /tmp/<you>. 
+A piped note can mention another page; that page's contents are not attached.
