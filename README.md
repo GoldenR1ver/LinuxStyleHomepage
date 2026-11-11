@@ -47,15 +47,23 @@ Edit only `src/config/site.ts`:
 
 ## Permissions
 
+Every file has an owner, a group, and mode bits (`rwx` for the owner, the group, and everyone else). `ls -l`, `stat`, and `tree -p` show them. `chmod` changes them. `chown` is root only.
+
+Root ignores the mode bits. A guest is the owner when the user name matches, the group when the group name matches, and otherwise "other". Reaching a path also needs search permission (`x`) on each parent directory.
+
+Shipped files are `0644` and directories are `0755`, owned by root. `/root` is `0700`. `/tmp` and `/var/guestbook` are `1777` (sticky): a guest may add a name, and may delete only a name they own. A scratch directory is `0700`, and files inside it are `0600`.
+
+A guest write must also fall under `/tmp/<name>` or `/var/guestbook/`. Public pages stay unchanged even when a mode bit would allow the write. Guests cannot replace a file that shipped with the site, including `README.md` in the guestbook. Root writes outside `/tmp` are published.
+
 |                               | guest                                              | root                   |
 | ----------------------------- | -------------------------------------------------- | ---------------------- |
-| read public files             | yes                                                | yes                    |
-| `/tmp/<name>`                 | writable, this browser only                        | writable, not uploaded |
+| read public files             | yes, while the mode bits allow it                  | yes                    |
+| `/root`                       | no (`0700`)                                        | yes                    |
+| `/tmp/<name>`                 | private to that user, this browser only            | writable, not uploaded |
 | new file in `/var/guestbook/` | writable, this browser only, staged for `mail push` | committed to the repo  |
 | edit about, notes, projects   | no                                                 | yes, via GitHub        |
+| `chmod` / `chown`             | `chmod` on files they own                          | both, on any file      |
 | `rollback`                    | no                                                 | yes                    |
-
-Guests cannot overwrite a published file, including `README.md` in the guestbook.
 
 ## Root publishes
 

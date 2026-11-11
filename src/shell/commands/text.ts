@@ -308,13 +308,32 @@ function collect(ctx: ShellCtx, files: string[], recursive: boolean): { name: st
   const out: { name: string; text: string }[] = []
   const visit = (file: string) => {
     const path = resolvePath(ctx, file)
-    const stat = ctx.rt.fs.stat(ctx.user, path)
+    let stat
+    try {
+      stat = ctx.rt.fs.stat(ctx.user, path)
+    } catch (err) {
+      if (err instanceof FsError && (err.code === 'EACCES' || err.code === 'ENOENT')) return
+      throw err
+    }
     if (stat.type === 'dir') {
       if (!recursive) throw new FsError('EISDIR', `${file}: Is a directory`)
-      for (const name of ctx.rt.fs.readdir(ctx.user, path)) visit(join(file, name))
+      let names: string[]
+      try {
+        names = ctx.rt.fs.readdir(ctx.user, path)
+      } catch (err) {
+        if (err instanceof FsError && err.code === 'EACCES') return
+        throw err
+      }
+      for (const name of names) visit(join(file, name))
       return
     }
-    const node = ctx.rt.fs.read(ctx.user, path)
+    let node
+    try {
+      node = ctx.rt.fs.read(ctx.user, path)
+    } catch (err) {
+      if (err instanceof FsError && err.code === 'EACCES') return
+      throw err
+    }
     if (node.encoding !== 'utf8') return
     out.push({ name: file, text: node.content })
   }

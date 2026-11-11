@@ -1,6 +1,8 @@
+import { applyMode, formatMode } from '../../kernel/policy'
 import { basename, isInside } from '../../kernel/path'
 import { displayWidth, padEndDisplay } from '../../kernel/width'
 import { FsError } from '../../kernel/vfs'
+import type { Stat } from '../../kernel/types'
 import type { ShellCtx } from '../context'
 import { matchGlob } from '../glob'
 import type { CommandSpec } from './types'
@@ -8,6 +10,7 @@ import { errorMessage, flags, joinPath, resolvePath, splitLines, writeFile } fro
 
 const RESET = '\x1b[0m'
 const BLUE = '\x1b[34m'
+const GREEN = '\x1b[32m'
 
 export const fileCommands: CommandSpec[] = [
   {
@@ -30,6 +33,7 @@ export const fileCommands: CommandSpec[] = [
       const next = !spec ? ctx.env.HOME || '/' : spec === '-' ? ctx.env.OLDPWD || ctx.cwd : resolvePath(ctx, spec)
       const stat = ctx.rt.fs.stat(ctx.user, next)
       if (stat.type !== 'dir') throw new FsError('ENOTDIR', `${spec || next}: Not a directory`)
+      if (!ctx.rt.fs.allows(ctx.user, stat.path, 1)) throw new FsError('EACCES', 'Permission denied')
       ctx.env.OLDPWD = ctx.cwd
       ctx.cwd = stat.path
       ctx.env.PWD = stat.path
@@ -68,24 +72,30 @@ export const fileCommands: CommandSpec[] = [
     name: 'tree',
     group: 'file',
     summary: 'list as a tree',
-    usage: 'tree [-a] [-L n] [path]',
-    manual: 'Default depth is 3.',
+    usage: 'tree [-aACdDfFgilnNpqst] [-L n] [-P pat] [path]',
+    manual: [
+      'List directories as a tree. The default depth is 3. The default drawing is ASCII.',
+      '-a  include names that start with a dot. .gitkeep stays hidden.',
+      '-A  draw with ANSI line characters instead of ASCII.',
+      '-C  color directories and executable files. -n turns color off. The later flag wins.',
+      '-d  list directories only.',
+      '-D  print the modification time.',
+      '-f  print the path from the argument, not only the name.',
+      '-F  append / to directories and * to executable files.',
+      '-g  print the group name stored on the file.',
+      '-i  print names without the tree branches.',
+      '-L n  limit the depth. -L 1 lists one level below the start.',
+      '-l  accepted. This filesystem has no symbolic links, so nothing is followed.',
+      '-N  print control characters as they are. The default writes them as octal escapes.',
+      '-p  print the permission bits.',
+      '-P pat  only names matching pat. * ? and [] work. Quote the pattern.',
+      '-q  print control characters as ?.',
+      '-s  print the size in bytes.',
+      '-t  sort by modification time, newest first.',
+    ].join('\n'),
     run(ctx, args) {
-      let depth = 3
-      let all = false
-      const rest: string[] = []
-      for (let i = 0; i < args.length; i++) {
-        const arg = args[i] ?? ''
-        if (arg === '-a') all = true
-        else if (arg === '-L') depth = numberArg(args[++i], 'depth')
-        else if (arg.startsWith('-L')) depth = numberArg(arg.slice(2), 'depth')
-        else if (arg.startsWith('-')) throw new FsError('EINVAL', `invalid option -- ${arg}`)
-        else rest.push(arg)
-      }
-      if (rest.length > 1) throw new FsError('EINVAL', 'too many arguments')
-      const root = rest[0] || '.'
-      const lines: string[] = [root]
-      drawTree(ctx, root, '', depth, all, lines)
+      const { opts, path } = parseTree(args)
+      const lines = renderTree(ctx, opts, path)
       const limited = lines.slice(0, 400)
       const suffix = lines.length > 400 ? '\n...(truncated)\n' : '\n'
       return { code: 0, stdout: `${limited.join('\n')}${suffix}` }
@@ -131,7 +141,8 @@ export const fileCommands: CommandSpec[] = [
     group: 'file',
     summary: 'file status',
     usage: 'stat path...',
-    manual: 'The mode bits are display only. Write rules live in src/kernel/policy.ts.',
+    manual:
+      'Root ignores the mode bits. Anyone else needs the owner, group, or other bits, and search permission on each parent. A guest can still write only under /tmp/<name> and /var/guestbook/.',
     run(ctx, args) {
       if (!args.length) throw new FsError('EINVAL', 'missing operand')
       const blocks = args.map((arg) => {
@@ -140,8 +151,9 @@ export const fileCommands: CommandSpec[] = [
           `  File: ${stat.path}`,
           `  Size: ${stat.size}`,
           `  Type: ${stat.type === 'dir' ? 'directory' : stat.encoding === 'binary' ? 'binary' : 'regular file'}`,
-          `  Mode: ${stat.mode.toString(8).padStart(4, '0')}`,
+          `  Mode: ${formatMode(stat.type, stat.mode)} (${(stat.mode & 0o7777).toString(8).padStart(4, '0')})`,
           `   Uid: ${stat.uid}`,
+          `   Gid: ${stat.gid}`,
           `Modify: ${formatTime(stat.mtime)}`,
         ].join('\n')
       })
@@ -290,19 +302,45 @@ export const fileCommands: CommandSpec[] = [
       return { code: 0, stdout: stdin }
     },
   },
+  {
+    name: 'chmod',
+    group: 'file',
+    summary: 'change mode bits',
+    usage: 'chmod mode path...',
+    manual:
+      'mode is octal, such as 644 or 0755, or symbolic, such as u+x or go-w. An omitted who means everyone. The owner and root may change the mode. Root is not limited by the bits when reading or writing. A guest can still write only under /tmp/<name> and /var/guestbook/.',
+    run(ctx, args) {
+      if (args.length < 2) throw new FsError('EINVAL', 'missing operand')
+      const spec = args[0] ?? ''
+      for (const file of args.slice(1)) {
+        const path = resolvePath(ctx, file)
+        const stat = ctx.rt.fs.stat(ctx.user, path)
+        ctx.rt.fs.chmod(ctx.user, path, parseMode(stat.mode, spec))
+      }
+      return { code: 0 }
+    },
+  },
+  {
+    name: 'chown',
+    group: 'file',
+    summary: 'change owner and group',
+    usage: 'chown user[:group] path...',
+    manual: 'Root only. The group is a name, the same string ls -l and tree -g print. There is no separate group account.',
+    run(ctx, args) {
+      if (args.length < 2) throw new FsError('EINVAL', 'missing operand')
+      const spec = args[0] ?? ''
+      const owner = parseOwner(spec)
+      for (const file of args.slice(1)) ctx.rt.fs.chown(ctx.user, resolvePath(ctx, file), owner.user, owner.group)
+      return { code: 0 }
+    },
+  },
 ]
 
 function longEntry(ctx: ShellCtx, path: string, name: string): string {
   const stat = ctx.rt.fs.stat(ctx.user, path)
-  const kind = stat.type === 'dir' ? 'd' : '-'
-  const mode = kind + modeBits(stat.mode)
+  const mode = formatMode(stat.type, stat.mode)
   const size = String(stat.size).padStart(6, ' ')
-  return `${mode} 1 ${stat.uid} ${stat.uid} ${size} ${formatTime(stat.mtime)} ${paint(ctx, path, name)}`
-}
-
-function modeBits(mode: number): string {
-  const bit = (value: number) => `${value & 4 ? 'r' : '-'}${value & 2 ? 'w' : '-'}${value & 1 ? 'x' : '-'}`
-  return bit(mode >> 6) + bit(mode >> 3) + bit(mode)
+  return `${mode} 1 ${stat.uid} ${stat.gid} ${size} ${formatTime(stat.mtime)} ${paint(ctx, path, name)}`
 }
 
 function paint(ctx: ShellCtx, path: string, name: string): string {
@@ -334,34 +372,257 @@ function columnize(names: string[], width: number): string {
   return lines.join('\n')
 }
 
-function drawTree(ctx: ShellCtx, path: string, prefix: string, depth: number, all: boolean, lines: string[]) {
-  if (depth < 1 || lines.length > 400) return
-  const absolute = resolvePath(ctx, path)
-  let names: string[] = []
-  try {
-    if (ctx.rt.fs.stat(ctx.user, absolute).type !== 'dir') return
-    names = ctx.rt.fs.readdir(ctx.user, absolute).filter((name) => all || !name.startsWith('.'))
-  } catch {
-    return
+interface TreeOpts {
+  all: boolean
+  ansi: boolean
+  color: boolean
+  dirs: boolean
+  times: boolean
+  full: boolean
+  classify: boolean
+  group: boolean
+  flat: boolean
+  depth: number
+  names: 'octal' | 'question' | 'raw'
+  perms: boolean
+  pattern: string | null
+  size: boolean
+  byTime: boolean
+}
+
+function treeDefaults(): TreeOpts {
+  return {
+    all: false,
+    ansi: false,
+    color: false,
+    dirs: false,
+    times: false,
+    full: false,
+    classify: false,
+    group: false,
+    flat: false,
+    depth: 3,
+    names: 'octal',
+    perms: false,
+    pattern: null,
+    size: false,
+    byTime: false,
   }
+}
+
+function parseTree(args: string[]): { opts: TreeOpts; path: string } {
+  const opts = treeDefaults()
+  const rest: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? ''
+    if (arg === '--') {
+      rest.push(...args.slice(i + 1))
+      break
+    }
+    if (!arg.startsWith('-') || arg === '-') {
+      rest.push(arg)
+      continue
+    }
+    const body = arg.slice(1)
+    for (let c = 0; c < body.length; c++) {
+      const ch = body[c] ?? ''
+      if (ch === 'L' || ch === 'P') {
+        const inline = body.slice(c + 1)
+        const value = inline || args[++i]
+        if (ch === 'L') opts.depth = numberArg(value, 'level')
+        else {
+          if (!value) throw new FsError('EINVAL', 'missing pattern')
+          opts.pattern = value
+        }
+        break
+      }
+      if (ch === 'a') opts.all = true
+      else if (ch === 'A') opts.ansi = true
+      else if (ch === 'C') opts.color = true
+      else if (ch === 'd') opts.dirs = true
+      else if (ch === 'D') opts.times = true
+      else if (ch === 'f') opts.full = true
+      else if (ch === 'F') opts.classify = true
+      else if (ch === 'g') opts.group = true
+      else if (ch === 'i') opts.flat = true
+      else if (ch === 'l') continue
+      else if (ch === 'n') opts.color = false
+      else if (ch === 'N') opts.names = 'raw'
+      else if (ch === 'p') opts.perms = true
+      else if (ch === 'q') opts.names = 'question'
+      else if (ch === 's') opts.size = true
+      else if (ch === 't') opts.byTime = true
+      else throw new FsError('EINVAL', `invalid option -- ${ch}`)
+    }
+  }
+  if (rest.length > 1) throw new FsError('EINVAL', 'too many arguments')
+  return { opts, path: rest[0] || '.' }
+}
+
+function renderTree(ctx: ShellCtx, opts: TreeOpts, rootArg: string): string[] {
+  const lines: string[] = []
+  const abs = resolvePath(ctx, rootArg)
+  const stat = ctx.rt.fs.stat(ctx.user, abs)
+  lines.push(treeLabel(opts, stat, rootArg))
+  if (stat.type === 'dir') fillTree(ctx, opts, abs, rootArg, '', opts.depth, lines)
+  return lines
+}
+
+function fillTree(
+  ctx: ShellCtx,
+  opts: TreeOpts,
+  abs: string,
+  display: string,
+  prefix: string,
+  depth: number,
+  lines: string[],
+) {
+  if (depth < 1 || lines.length > 400) return
+  let names: string[]
+  try {
+    names = ctx.rt.fs.readdir(ctx.user, abs)
+  } catch (err) {
+    if (err instanceof FsError && err.code === 'EACCES') {
+      lines.push(`${prefix}[Permission denied]`)
+      return
+    }
+    throw err
+  }
+  names = names.filter((name) => opts.all || !name.startsWith('.'))
+  names = names.filter((name) => keepTree(ctx, opts, abs, name, depth))
+  names = orderTree(ctx, opts, abs, names)
+  const graphics = opts.flat ? FLAT : opts.ansi ? ANSI : ASCII
   names.forEach((name, index) => {
     if (lines.length > 400) return
     const last = index === names.length - 1
-    lines.push(`${prefix}${last ? '└── ' : '├── '}${name}`)
-    drawTree(ctx, joinPath(path, name), `${prefix}${last ? '    ' : '│   '}`, depth - 1, all, lines)
+    const childAbs = joinPath(abs, name)
+    const childDisplay = opts.full ? joinPath(display, name) : name
+    let stat: Stat
+    try {
+      stat = ctx.rt.fs.stat(ctx.user, childAbs)
+    } catch {
+      lines.push(`${prefix}${graphics.branch(last)}${renderControls(childDisplay, opts.names)}`)
+      return
+    }
+    lines.push(`${prefix}${graphics.branch(last)}${treeLabel(opts, stat, childDisplay)}`)
+    if (stat.type === 'dir') {
+      fillTree(ctx, opts, childAbs, childDisplay, `${prefix}${graphics.pad(last)}`, depth - 1, lines)
+    }
   })
+}
+
+function keepTree(ctx: ShellCtx, opts: TreeOpts, dir: string, name: string, depth: number): boolean {
+  const abs = joinPath(dir, name)
+  let stat: Stat
+  try {
+    stat = ctx.rt.fs.stat(ctx.user, abs)
+  } catch {
+    return true
+  }
+  if (opts.dirs && stat.type !== 'dir') return false
+  if (!opts.pattern) return true
+  if (matchGlob(opts.pattern, name)) return true
+  if (stat.type !== 'dir') return false
+  return containsMatch(ctx, opts, abs, depth - 1)
+}
+
+function containsMatch(ctx: ShellCtx, opts: TreeOpts, abs: string, depth: number): boolean {
+  if (depth < 1 || !opts.pattern) return false
+  let names: string[]
+  try {
+    names = ctx.rt.fs.readdir(ctx.user, abs)
+  } catch {
+    return false
+  }
+  for (const name of names) {
+    if (!opts.all && name.startsWith('.')) continue
+    if (matchGlob(opts.pattern, name)) return true
+    if (depth <= 1) continue
+    try {
+      if (ctx.rt.fs.stat(ctx.user, joinPath(abs, name)).type !== 'dir') continue
+    } catch {
+      continue
+    }
+    if (containsMatch(ctx, opts, joinPath(abs, name), depth - 1)) return true
+  }
+  return false
+}
+
+function orderTree(ctx: ShellCtx, opts: TreeOpts, dir: string, names: string[]): string[] {
+  if (!opts.byTime) return names
+  const stamp = (name: string) => {
+    try {
+      return ctx.rt.fs.stat(ctx.user, joinPath(dir, name)).mtime
+    } catch {
+      return 0
+    }
+  }
+  return [...names].sort((a, b) => stamp(b) - stamp(a) || a.localeCompare(b, 'zh-CN'))
+}
+
+function treeLabel(opts: TreeOpts, stat: Stat, display: string): string {
+  const parts: string[] = []
+  if (opts.perms) parts.push(`[${formatMode(stat.type, stat.mode)}]`)
+  if (opts.size) parts.push(`[${stat.size}]`)
+  if (opts.group) parts.push(`[${stat.gid}]`)
+  if (opts.times) parts.push(`[${formatTime(stat.mtime)}]`)
+  let name = renderControls(display, opts.names)
+  if (opts.color) {
+    const color = stat.type === 'dir' ? BLUE : executable(stat.mode) ? GREEN : ''
+    if (color) name = `${color}${name}${RESET}`
+  }
+  if (opts.classify) name += stat.type === 'dir' ? '/' : executable(stat.mode) ? '*' : ''
+  parts.push(name)
+  return parts.join(' ')
+}
+
+function executable(mode: number): boolean {
+  return (mode & 0o111) !== 0
+}
+
+function renderControls(text: string, style: TreeOpts['names']): string {
+  if (style === 'raw') return text
+  let out = ''
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code >= 32 && code !== 127) out += ch
+    else if (style === 'question') out += '?'
+    else out += `\\${code.toString(8).padStart(3, '0')}`
+  }
+  return out
+}
+
+const ASCII = {
+  branch: (last: boolean) => (last ? '`-- ' : '|-- '),
+  pad: (last: boolean) => (last ? '    ' : '|   '),
+}
+const ANSI = {
+  branch: (last: boolean) => (last ? '└── ' : '├── '),
+  pad: (last: boolean) => (last ? '    ' : '│   '),
+}
+const FLAT = {
+  branch: (_last: boolean) => '',
+  pad: (_last: boolean) => '',
 }
 
 function walk(ctx: ShellCtx, path: string, visit: (path: string) => void) {
   visit(path)
-  let stat
+  let stat: Stat
   try {
     stat = ctx.rt.fs.stat(ctx.user, resolvePath(ctx, path))
-  } catch {
-    return
+  } catch (err) {
+    if (err instanceof FsError && (err.code === 'EACCES' || err.code === 'ENOENT')) return
+    throw err
   }
   if (stat.type !== 'dir') return
-  for (const name of ctx.rt.fs.readdir(ctx.user, stat.path)) walk(ctx, joinPath(path, name), visit)
+  let names: string[]
+  try {
+    names = ctx.rt.fs.readdir(ctx.user, stat.path)
+  } catch (err) {
+    if (err instanceof FsError && err.code === 'EACCES') return
+    throw err
+  }
+  for (const name of names) walk(ctx, joinPath(path, name), visit)
 }
 
 function copyPath(ctx: ShellCtx, from: string, to: string, recursive: boolean) {
@@ -396,6 +657,25 @@ function numbered(text: string): string {
   const body = lines.map((line, index) => `${String(index + 1).padStart(6)}\t${line}`).join('\n')
   if (!body) return text
   return text.endsWith('\n') || text === '' ? `${body}\n` : body
+}
+
+function parseMode(current: number, spec: string): number {
+  try {
+    return applyMode(current, spec)
+  } catch {
+    throw new FsError('EINVAL', `invalid mode ${spec}`)
+  }
+}
+
+function parseOwner(spec: string): { user: string; group: string | null } {
+  const colon = spec.indexOf(':')
+  const user = colon < 0 ? spec : spec.slice(0, colon)
+  const group = colon < 0 ? null : spec.slice(colon + 1)
+  const legal = /^[^\s/\\:\u0000]{1,32}$/
+  if ((!user && group === null) || (user && !legal.test(user)) || (group !== null && !legal.test(group))) {
+    throw new FsError('EINVAL', 'invalid owner')
+  }
+  return { user, group }
 }
 
 function numberArg(value: string | undefined, label: string): number {

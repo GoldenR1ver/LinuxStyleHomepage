@@ -1,4 +1,3 @@
-import { canRead } from '../kernel/policy'
 import { isInside, normalize, resolve } from '../kernel/path'
 import type { User } from '../kernel/types'
 import type { VirtualFS } from '../kernel/vfs'
@@ -41,7 +40,7 @@ export function stageSavedGuestbook(ctx: ShellCtx, path: string): string {
 
 export function stageWorktree(ctx: ShellCtx, stdin: string): { lines: string; error: string } {
   const paths = [...localTexts(ctx.rt.fs).entries()]
-    .filter(([path, text]) => isWorktreePath(ctx.user, path) && text.trim() && canRead(ctx.user, path))
+    .filter(([path, text]) => isWorktreePath(ctx.user, path) && text.trim() && readable(ctx, path))
     .map(([path]) => path)
     .sort((a, b) => a.localeCompare(b, 'zh-CN'))
   const lines: string[] = []
@@ -110,8 +109,11 @@ export function composeLetter(ctx: ShellCtx): { body: string; path: string } | {
     } catch {
       return { error: 'mail: invalid path. The letter was not sent.\n' }
     }
-    if (!isWorktreePath(ctx.user, path) || !canRead(ctx.user, path)) {
+    if (!isWorktreePath(ctx.user, path)) {
       return { error: `mail: ${path}: not in the work tree. The letter was not sent.\n` }
+    }
+    if (!readable(ctx, path)) {
+      return { error: `mail: ${path}: Permission denied. The letter was not sent.\n` }
     }
     const text = local.get(path)
     if (text === undefined) return { error: `mail: ${path}: missing. The letter was not sent.\n` }
@@ -154,6 +156,14 @@ function localTexts(fs: VirtualFS): Map<string, string> {
     if (entry.type === 'file' && entry.encoding === 'utf8') map.set(path, entry.content)
   }
   return map
+}
+
+function readable(ctx: ShellCtx, path: string): boolean {
+  try {
+    return ctx.rt.fs.read(ctx.user, path).encoding === 'utf8'
+  } catch {
+    return false
+  }
 }
 
 function readableFile(ctx: ShellCtx, path: string): string {

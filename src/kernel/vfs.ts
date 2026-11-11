@@ -1,5 +1,5 @@
-import { basename, dirname, normalize } from './path'
-import { canRead, canWrite, publishes } from './policy'
+import { basename, dirname, normalize, parentChain } from './path'
+import { canWrite, createdMode, modePermits, publishes, shippedMode } from './policy'
 import {
   MAX_FILE_BYTES,
   type DirNode,
@@ -65,15 +65,13 @@ export class VirtualFS {
       ensureParents(image, path)
       image.set(path, textFile(content, 'root', 0))
     }
-    for (const dir of ['/tmp', '/root', '/var', '/var/guestbook', '/home', '/etc']) {
-      if (!image.has(dir)) image.set(dir, emptyDir())
-    }
+    installSystemDirs(image)
     return new VirtualFS(image)
   }
 
   loadOverlay(remote: [string, Entry][], local: [string, Entry][]) {
-    this.remote = new Map(remote.filter((pair) => isEntry(pair[1])))
-    this.local = new Map(local.filter((pair) => isEntry(pair[1])))
+    this.remote = new Map(remote.filter((pair) => isEntry(pair[1])).map(([path, entry]) => [path, hydrate(entry)]))
+    this.local = new Map(local.filter((pair) => isEntry(pair[1])).map(([path, entry]) => [path, hydrate(entry)]))
   }
 
   exportLayer(layer: 'local' | 'remote'): [string, Entry][] {
@@ -146,38 +144,54 @@ export class VirtualFS {
 
   stat(user: User, raw: string): Stat {
     const path = normalize(raw)
-    this.assertRead(user, path)
+    this.assertSearch(user, path)
     const node = this.visible(path)
     if (!node) throw new FsError('ENOENT', 'No such file or directory')
     return {
       path,
       type: node.type,
-      size: node.type === 'file' ? node.size : this.childNames(path).length,
+      size:
+        node.type === 'file'
+          ? node.size
+          : modePermits(user, cred(node), 4)
+            ? this.childNames(path).length
+            : 0,
       mtime: node.mtime,
       mode: node.mode,
       uid: node.uid,
+      gid: node.gid || node.uid,
       encoding: node.type === 'file' ? node.encoding : undefined,
     }
   }
 
+  /** True when the node itself grants this bit. Ancestors are not checked. Root always grants. */
+  allows(user: User, raw: string, bit: 1 | 2 | 4): boolean {
+    if (user.role === 'root') return true
+    const node = this.visible(normalize(raw))
+    if (!node) return false
+    return modePermits(user, cred(node), bit)
+  }
+
   read(user: User, raw: string): FileNode {
     const path = normalize(raw)
-    this.assertRead(user, path)
+    this.assertSearch(user, path)
     const node = this.visible(path)
     if (!node) throw new FsError('ENOENT', 'No such file or directory')
     if (node.type !== 'file') throw new FsError('EISDIR', 'Is a directory')
+    if (!modePermits(user, cred(node), 4)) throw new FsError('EACCES', 'Permission denied')
     return clone(node)
   }
 
   readdir(user: User, raw: string): string[] {
     const path = normalize(raw)
-    this.assertRead(user, path)
+    this.assertSearch(user, path)
     const node = this.visible(path)
     if (!node) throw new FsError('ENOENT', 'No such file or directory')
     if (node.type !== 'dir') throw new FsError('ENOTDIR', 'Not a directory')
-    return this.childNames(path)
-      .filter((name) => canRead(user, joinPath(path, name)))
-      .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    if (!modePermits(user, cred(node), 4) || !modePermits(user, cred(node), 1)) {
+      throw new FsError('EACCES', 'Permission denied')
+    }
+    return this.childNames(path).sort((a, b) => a.localeCompare(b, 'zh-CN'))
   }
 
   exists(user: User, raw: string): boolean {
@@ -206,7 +220,14 @@ export class VirtualFS {
     const layer = publishes(user, path) ? 'remote' : 'local'
     const previous = this.publishedText(path)
     const step = this.capture(path)
-    const node = textFile(content, user.name)
+    const prior = existing.node?.type === 'file' ? existing.node : null
+    const node = textFile(
+      content,
+      prior?.uid ?? user.name,
+      Date.now(),
+      prior?.mode ?? createdMode(path, 'file'),
+      prior?.gid || prior?.uid || user.name,
+    )
     if (layer === 'remote') {
       this.local.delete(path)
       this.remote.set(path, node)
@@ -237,8 +258,13 @@ export class VirtualFS {
     if (user.role !== 'root' && existing.from !== 'local') throw new FsError('EACCES', 'Permission denied')
     if (existing.node.encoding !== 'utf8') throw new FsError('EINVAL', 'cannot modify binary file')
     const step = this.capture(path)
-    const node = textFile(existing.node.content, existing.node.uid)
-    node.mode = existing.node.mode
+    const node = textFile(
+      existing.node.content,
+      existing.node.uid,
+      Date.now(),
+      existing.node.mode,
+      existing.node.gid || existing.node.uid,
+    )
     if (publishes(user, path)) {
       this.local.delete(path)
       this.remote.set(path, node)
@@ -258,8 +284,41 @@ export class VirtualFS {
     this.assertTx()
     if (publishes(user, path)) throw new FsError('EINVAL', 'cannot modify binary file')
     this.prepareFile(user, path)
+    const existing = this.lookup(path)
+    if (user.role !== 'root' && existing.node && existing.from !== 'local') {
+      throw new FsError('EACCES', 'Permission denied')
+    }
     const step = this.capture(path)
-    this.local.set(path, { ...clone(source), uid: user.name, mtime: Date.now() })
+    this.local.set(path, { ...clone(source), uid: user.name, gid: user.name, mtime: Date.now() })
+    this.steps.push(step)
+  }
+
+  chmod(user: User, raw: string, mode: number) {
+    this.assertTx()
+    const path = normalize(raw)
+    this.assertSearch(user, path)
+    const found = this.lookup(path)
+    if (!found.node) throw new FsError('ENOENT', 'No such file or directory')
+    if (user.role !== 'root' && found.node.uid !== user.name) throw new FsError('EACCES', 'Permission denied')
+    const step = this.capture(path)
+    const next = clone(found.node)
+    next.mode = mode & 0o7777
+    this.saveMeta(path, found.from, next)
+    this.steps.push(step)
+  }
+
+  chown(user: User, raw: string, owner: string, group: string | null) {
+    this.assertTx()
+    if (user.role !== 'root') throw new FsError('EACCES', 'Permission denied')
+    const path = normalize(raw)
+    this.assertSearch(user, path)
+    const found = this.lookup(path)
+    if (!found.node) throw new FsError('ENOENT', 'No such file or directory')
+    const step = this.capture(path)
+    const next = clone(found.node)
+    if (owner) next.uid = owner
+    if (group !== null) next.gid = group
+    this.saveMeta(path, found.from, next)
     this.steps.push(step)
   }
 
@@ -287,7 +346,7 @@ export class VirtualFS {
     if (path === '/') throw new FsError('EINVAL', 'refusing to remove /')
     let node: Node | null
     try {
-      this.assertRead(user, path)
+      this.assertSearch(user, path)
       node = this.visible(path)
     } catch (err) {
       if (opts?.force && err instanceof FsError && err.code === 'ENOENT') return
@@ -312,14 +371,20 @@ export class VirtualFS {
   }
 
   private mkdirOne(user: User, path: string) {
-    this.assertWriteZone(user, path)
+    this.assertCreate(user, path)
     if (this.visible(path)) throw new FsError('EEXIST', 'File exists')
     const parent = this.visible(dirname(path))
     if (!parent) throw new FsError('ENOENT', 'No such file or directory')
     if (parent.type !== 'dir') throw new FsError('ENOTDIR', 'Not a directory')
     const remote = publishes(user, path)
     const step = this.capture(path)
-    const node = { ...emptyDir(), uid: user.name, mtime: Date.now() }
+    const node: DirNode = {
+      type: 'dir',
+      mtime: Date.now(),
+      mode: createdMode(path, 'dir'),
+      uid: user.name,
+      gid: user.name,
+    }
     if (remote) {
       this.local.delete(path)
       this.remote.set(path, node)
@@ -343,7 +408,7 @@ export class VirtualFS {
     if (existing.node.type === 'file' && existing.node.encoding === 'binary' && publishes(user, path)) {
       throw new FsError('EINVAL', 'cannot modify binary file')
     }
-    this.assertWriteZone(user, path)
+    this.assertUnlink(user, path)
     if (user.role !== 'root' && existing.from !== 'local') throw new FsError('EACCES', 'Permission denied')
     const remote = publishes(user, path)
     const previous = existing.node.type === 'file' && existing.node.encoding === 'utf8' ? existing.node.content : null
@@ -364,7 +429,7 @@ export class VirtualFS {
   }
 
   private prepareFile(user: User, path: string) {
-    this.assertWriteZone(user, path)
+    this.assertWriteContent(user, path)
     const parent = this.visible(dirname(path))
     if (!parent) throw new FsError('ENOENT', 'No such file or directory')
     if (parent.type !== 'dir') throw new FsError('ENOTDIR', 'Not a directory')
@@ -385,13 +450,62 @@ export class VirtualFS {
     if (!this.depth) throw new FsError('EIO', 'no transaction')
   }
 
-  private assertRead(user: User, path: string) {
-    if (!canRead(user, path)) throw new FsError('EACCES', 'Permission denied')
+  private saveMeta(path: string, from: 'local' | 'remote' | 'image' | 'none', node: Node) {
+    if (from === 'local') {
+      this.local.set(path, node)
+      return
+    }
+    this.remote.set(path, node)
   }
 
-  private assertWriteZone(user: User, path: string) {
-    this.assertRead(user, path)
+  private assertSearch(user: User, path: string) {
+    if (user.role === 'root') return
+    for (const dir of parentChain(path)) {
+      if (dir === path) break
+      const node = this.visible(dir)
+      if (!node) throw new FsError('ENOENT', 'No such file or directory')
+      if (node.type !== 'dir') throw new FsError('ENOTDIR', 'Not a directory')
+      if (!modePermits(user, cred(node), 1)) throw new FsError('EACCES', 'Permission denied')
+    }
+  }
+
+  private assertCreate(user: User, path: string) {
     if (!canWrite(user, path)) throw new FsError('EACCES', 'Permission denied')
+    if (user.role === 'root') return
+    this.assertSearch(user, path)
+    const parent = this.visible(dirname(path))
+    if (!parent || parent.type !== 'dir') return
+    if (!modePermits(user, cred(parent), 2) || !modePermits(user, cred(parent), 1)) {
+      throw new FsError('EACCES', 'Permission denied')
+    }
+  }
+
+  private assertWriteContent(user: User, path: string) {
+    if (!canWrite(user, path)) throw new FsError('EACCES', 'Permission denied')
+    if (user.role === 'root') return
+    this.assertSearch(user, path)
+    const existing = this.visible(path)
+    if (!existing) {
+      this.assertCreate(user, path)
+      return
+    }
+    if (!modePermits(user, cred(existing), 2)) throw new FsError('EACCES', 'Permission denied')
+  }
+
+  private assertUnlink(user: User, path: string) {
+    if (!canWrite(user, path)) throw new FsError('EACCES', 'Permission denied')
+    if (user.role === 'root') return
+    this.assertSearch(user, path)
+    const parent = this.visible(dirname(path))
+    if (!parent || parent.type !== 'dir') return
+    if (!modePermits(user, cred(parent), 2) || !modePermits(user, cred(parent), 1)) {
+      throw new FsError('EACCES', 'Permission denied')
+    }
+    if ((parent.mode & 0o1000) === 0) return
+    const node = this.visible(path)
+    if (!node) return
+    if (node.uid === user.name || parent.uid === user.name) return
+    throw new FsError('EACCES', 'Permission denied')
   }
 
   private clearTx() {
@@ -469,20 +583,43 @@ export class VirtualFS {
   }
 }
 
-function emptyDir(): DirNode {
-  return { type: 'dir', mtime: 0, mode: 0o755, uid: 'root' }
+export function installSystemDirs(image: Map<string, Node>) {
+  if (!image.has('/')) image.set('/', emptyDir())
+  for (const dir of ['/tmp', '/root', '/var', '/var/guestbook', '/home', '/etc']) {
+    if (!image.has(dir)) image.set(dir, emptyDir())
+  }
+  for (const [path, node] of image) {
+    if (node.type !== 'file' && node.type !== 'dir') continue
+    node.mode = shippedMode(path, node.type)
+    node.uid = node.uid || 'root'
+    node.gid = node.gid || node.uid
+  }
 }
 
-function textFile(content: string, uid: string, mtime = Date.now()): FileNode {
+function emptyDir(): DirNode {
+  return { type: 'dir', mtime: 0, mode: 0o755, uid: 'root', gid: 'root' }
+}
+
+function textFile(content: string, uid: string, mtime = Date.now(), mode = 0o644, gid = uid): FileNode {
   return {
     type: 'file',
     content,
     encoding: 'utf8',
     size: byteLength(content),
     mtime,
-    mode: 0o644,
+    mode,
     uid,
+    gid,
   }
+}
+
+function cred(node: Node): { mode: number; uid: string; gid: string } {
+  return { mode: node.mode, uid: node.uid, gid: node.gid || node.uid }
+}
+
+function hydrate(entry: Entry): Entry {
+  if (entry.type === 'tomb') return entry
+  return { ...entry, uid: entry.uid || 'root', gid: entry.gid || entry.uid || 'root' }
 }
 
 function ensureParents(image: Map<string, Node>, path: string) {

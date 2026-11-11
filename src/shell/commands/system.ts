@@ -328,9 +328,20 @@ function trimNum(value: number): string {
 }
 
 function du(ctx: ShellCtx, path: string): number {
-  const stat = ctx.rt.fs.stat(ctx.user, path)
+  let stat
+  try {
+    stat = ctx.rt.fs.stat(ctx.user, path)
+  } catch {
+    return 0
+  }
   if (stat.type === 'file') return stat.size
-  return ctx.rt.fs.readdir(ctx.user, path).reduce((sum, name) => sum + du(ctx, `${path === '/' ? '' : path}/${name}`), 0)
+  let names: string[]
+  try {
+    names = ctx.rt.fs.readdir(ctx.user, path)
+  } catch {
+    return 0
+  }
+  return names.reduce((sum, name) => sum + du(ctx, `${path === '/' ? '' : path}/${name}`), 0)
 }
 
 function become(ctx: ShellCtx, user: ShellCtx['user']) {

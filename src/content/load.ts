@@ -1,3 +1,4 @@
+import { installSystemDirs } from '../kernel/vfs'
 import type { DirNode, FileNode, Node } from '../kernel/types'
 
 interface ManifestFile {
@@ -32,9 +33,11 @@ export async function loadImage(): Promise<Map<string, Node>> {
       mtime: file.mtime,
       mode: 0o644,
       uid: 'root',
+      gid: 'root',
     }
     image.set(file.path, node)
   }
+  installSystemDirs(image)
   return image
 }
 
@@ -48,5 +51,5 @@ function ensureParents(image: Map<string, Node>, path: string) {
 }
 
 function dir(): DirNode {
-  return { type: 'dir', mtime: 0, mode: 0o755, uid: 'root' }
+  return { type: 'dir', mtime: 0, mode: 0o755, uid: 'root', gid: 'root' }
 }

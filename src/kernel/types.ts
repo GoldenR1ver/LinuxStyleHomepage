@@ -13,6 +13,7 @@ export interface FileNode {
   mtime: number
   mode: number
   uid: string
+  gid: string
 }
 
 export interface DirNode {
@@ -20,6 +21,7 @@ export interface DirNode {
   mtime: number
   mode: number
   uid: string
+  gid: string
 }
 
 /** Hides the same path in a lower layer. */
@@ -53,6 +55,7 @@ export interface Stat {
   mtime: number
   mode: number
   uid: string
+  gid: string
   encoding?: 'utf8' | 'binary'
 }
 

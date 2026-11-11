@@ -1,3 +1,0 @@
-# Guestbook
-
-type help

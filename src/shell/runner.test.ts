@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { runLine } from './runner'
 import { boot } from '../testkit'
+import { FsError } from '../kernel/vfs'
 
 const root = { name: 'root', role: 'root' as const }
+const ada = { name: 'ada', role: 'guest' as const }
 
 describe('shell', () => {
   it('pipes and searches', async () => {
@@ -170,5 +172,58 @@ describe('shell', () => {
     expect(alias.stdout).toContain('about.md')
     const lines = await runLine("echo -e 'a\\nb'", ctx)
     expect(lines.stdout).toBe('a\nb\n')
+  })
+
+  it('enforces mode bits and the tree switches', async () => {
+    const guest = boot()
+    expect((await runLine('cd /root', guest.ctx)).code).toBe(1)
+    expect((await runLine('chmod 600 /home/owner/about.md', guest.ctx)).stderr).toContain('Permission denied')
+    expect((await runLine('chown ada /tmp/ada', guest.ctx)).code).toBe(1)
+    expect((await runLine('echo hi > /tmp/ada/a.txt', guest.ctx)).code).toBe(0)
+    expect((await runLine('chmod 000 /tmp/ada/a.txt', guest.ctx)).code).toBe(0)
+    expect((await runLine('cat /tmp/ada/a.txt', guest.ctx)).code).toBe(1)
+    expect(guest.fs.read(root, '/tmp/ada/a.txt').content).toBe('hi\n')
+
+    const owned = boot({ user: root })
+    expect((await runLine('chmod 600 /home/owner/about.md', owned.ctx)).code).toBe(0)
+    expect(() => owned.fs.read(ada, '/home/owner/about.md')).toThrow(FsError)
+    expect(owned.fs.read(root, '/home/owner/about.md').content).toBe('about\n')
+    expect((await runLine('chown ada:readers /home/owner/about.md', owned.ctx)).code).toBe(0)
+    expect(owned.fs.stat(root, '/home/owner/about.md').gid).toBe('readers')
+
+    const { ctx, fs } = boot()
+    const plain = await runLine('tree -L 1', ctx)
+    expect(plain.stdout).toBe('.\n|-- about.md\n`-- notes\n')
+    const ansi = await runLine('tree -A -L 1', ctx)
+    expect(ansi.stdout).toContain('├── about.md')
+    expect(ansi.stdout).toContain('└── notes')
+    const dirs = await runLine('tree -d', ctx)
+    expect(dirs.stdout).not.toContain('about.md')
+    expect(dirs.stdout).toContain('notes')
+    const perm = await runLine('tree -p -L 1', ctx)
+    expect(perm.stdout).toContain('[drwxr-xr-x] notes')
+    expect(perm.stdout).toContain('[-rw-r--r--] about.md')
+    const flat = await runLine('tree -f -i -L 1', ctx)
+    expect(flat.stdout).toContain('./about.md')
+    expect(flat.stdout).not.toContain('|--')
+    expect((await runLine('tree -C -L 1 -d', ctx)).stdout).toContain('\x1b[34m')
+    expect((await runLine('tree -C -n -L 1 -d', ctx)).stdout).not.toContain('\x1b[')
+    expect((await runLine('tree -l -L 0', ctx)).stdout).toBe('.\n')
+    expect((await runLine('tree -z', ctx)).code).toBe(1)
+
+    fs.begin()
+    fs.write(root, '/home/owner/z.txt', 'z\n')
+    fs.finish()
+    const timed = ((await runLine('tree -t -L 1', ctx)).stdout ?? '').split('\n')
+    expect(timed[1] ?? '').toContain('z.txt')
+    fs.begin()
+    fs.write(root, '/home/owner/a\u0007b.txt', 'x\n')
+    fs.finish()
+    expect((await runLine('tree -q -L 1 -P "a*"', ctx)).stdout).toContain('a?b.txt')
+    expect((await runLine('tree -N -L 1 -P "a*"', ctx)).stdout).toContain('a\u0007b.txt')
+    expect((await runLine('tree -L 1 -P "a*"', ctx)).stdout).toContain('a\\007b.txt')
+    const marked = await runLine('tree -F -g -s -D -d', ctx)
+    expect(marked.stdout).toContain('[root]')
+    expect(marked.stdout).toContain('notes/')
   })
 })
