@@ -1,0 +1,45 @@
+Preserving Topological Information for Social Network Condensation via Knowledge Distillation
+
+[DOI]:
+https://doi.org/10.1007/978-981-95-9877-9_4
+
+[Published]:
+23 June 2026
+
+[Area]: 
+
+Graph condensation (GC), i.e., graph dataset distillation, sits at the intersection of dataset distillation and GNN efficiency.
+
+GNN capability comes from recursive neighborhood aggregation; on large social networks, irregular memory accesses and peak memory that rises sharply as neighborhoods expand incur enormous overhead. Hence, "can we train an equivalent model without the original graph?" has become a research question in its own right.
+
+This line of work has now split into two branches. One is structure-aware, but the training cost remains; the other is structure-free — faster, yet the accuracy loss has no clear upper bound.
+
+Specifically:
+
+- Gradient matching aligns the gradients or optimization trajectories on the condensed graph with those on the original graph, but the update overhead is enormous.
+- Performance matching directly aligns downstream accuracy, and is prone to overfitting.
+- Distribution matching aligns the distributions of embeddings or features; training is extremely fast, but structural information is entirely discarded.
+
+Our work falls under structure-free distribution matching, with optimizations. We use an MLP on small graphs; on large graphs, we first train a GCN model to preserve the large graph's topological structure, then distill an MLP from it, which is used to align with the small graphs.
+
+[Method]:
+
+Detailed information can be found in the paper. Here we present the main guiding ideas and assumptions behind the design of our formulas.
+
+- Phase 0: Train a GCN on the full graph
+- Phase 1: GNN → MLP knowledge distillation (logit KL + layer-wise feature alignment)
+- Phase 2: Use this distilled MLP as a "structure-aware encoder," matching first- and second-order moments layer by layer and class by class, to synthesize a small batch of structure-free node prototypes
+
+We use the KL divergence between the logits of the GNN and the MLP to measure the similarity between the two models. KL divergence is a measure of how much one distribution is different from another. The denominator takes the expectation over a family of graphs that share the same attribute distribution but are independent of topology.
+
+Soften with temperature t; when t > 1, the entropy of the soft labels increases and small logit differences are amplified — effectively using the topology-induced inter-class similarity as additional supervision.
+
+Afterwards, we perform layer-wise feature alignment using MSE. Before that, we apply L2 normalization to remove the scale degree of freedom and constrain only the geometric relations of the representations, thereby ensuring cross-layer comparability. Also, since layers differ in importance, we designed a suitable weighting ratio.
+
+At this point we have obtained the logit loss and the feature loss. Their gradient scales and convergence rates differ, so we designed three different weights, respectively weighting "answer alignment," "process alignment," and "which layer's structure matters more." Our subsequent ablation experiments are also based on this weight allocation scheme.
+
+We extract the mean and second-order moments of the original graph and of the subgraph, subtract the corresponding pairs and take the L2 norm, as the matching loss for feature alignment. We designed pyramid-shaped weights because shallow features reflect the distribution more directly, whereas deep features provide only indirect signals.
+
+
+
+
