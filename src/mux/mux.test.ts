@@ -17,6 +17,9 @@ function ctx(): ShellCtx {
       async askSecret() {
         return null
       },
+      async pickFiles() {
+        return null
+      },
     },
     columns: 80,
     closing: false,

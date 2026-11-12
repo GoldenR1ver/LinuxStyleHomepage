@@ -31,7 +31,7 @@ export const mailCommand: CommandSpec = {
   manual:
     'Stages a letter and sends it to the owner. The relay URL and the recipient come from site.ts. This command cannot change either of them, and it does not read the GitHub token.\n\n' +
     'mail prints the subject and staged paths. mail -m sets the subject. mail add with no path stages text files in /var/guestbook and /tmp/<you>. mail add <path> stages one of those files, or, with a piped note, a comment about another page. That page is not attached. mail push sends one letter. mail reset clears the draft.\n\n' +
-    'Saving a new guestbook file stages it. The owner reads the letter in the mailbox behind webhookUrl. Other visitors cannot see it, and it is not committed.',
+    'Saving a new guestbook file stages it. scp copies a file from your computer into the current directory first. The owner reads the letter in the mailbox behind webhookUrl. Other visitors cannot see it, and it is not committed.',
   async run(ctx, args, stdin) {
     const blocked = fixedRoute(args)
     if (blocked) return { code: 1, stderr: blocked }

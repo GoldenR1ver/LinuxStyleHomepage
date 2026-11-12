@@ -38,6 +38,27 @@ export function stageSavedGuestbook(ctx: ShellCtx, path: string): string {
   return `staged ${normal}. ${next}\n`
 }
 
+/** A rename or delete can leave a staged work-tree path behind. Drop it before the next send. */
+export function pruneMissingDraft(ctx: ShellCtx): string {
+  const draft = ctx.rt.outbox.draft
+  const kept: string[] = []
+  const dropped: string[] = []
+  for (const file of draft.files) {
+    let path: string
+    try {
+      path = normalize(file)
+    } catch {
+      kept.push(file)
+      continue
+    }
+    if (!isWorktreePath(ctx.user, path) || readable(ctx, path)) kept.push(file)
+    else dropped.push(path)
+  }
+  if (!dropped.length) return ''
+  draft.files = kept
+  return `dropped ${dropped.join(', ')} from the draft (missing).\n`
+}
+
 export function stageWorktree(ctx: ShellCtx, stdin: string): { lines: string; error: string } {
   const paths = [...localTexts(ctx.rt.fs).entries()]
     .filter(([path, text]) => isWorktreePath(ctx.user, path) && text.trim() && readable(ctx, path))

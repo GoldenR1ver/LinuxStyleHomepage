@@ -63,6 +63,8 @@ const labels = [
 
 const GUIDE = `home
 
+[1;36mTry to use 'cat /home/owner/about.txt' to read the about page.[0m
+
 Pages
   [1;33m/home/owner[0m                     about, projects, notes, resume
   cat about.txt                   
@@ -72,17 +74,22 @@ Pages
   wget about.pdf                  download, including pdf
 
 Guestbook
-  [1;33m modify the guestbook to leave me a message[0m
-  vim /var/guestbook/your-name.txt
+  [1;33mcd /var/guestbook to write a note or add an attachment[0m
+  vim your-name.txt                 write your note
+  scp                               upload files from this computer
+  cp /home/owner/about.txt quote.txt  copy a page into your note
+  mv old.txt new.txt                move or rename
   mail -m "subject"
   mail add
   mail push
-  The note stays in this browser. mail push notifies the owner. It is not published.
+  Text files are staged by mail add. Binary uploads stay in your browser; wget downloads them.
+  echo "question" | mail add /home/owner/about.txt   comment on a page without attaching it
+  The note stays in your browser. Mail push notifies the owner. It is not published.
 
 Scratch
   ~                           /tmp/<you>, this browser only
 
-This terminal is equipped with [1;33mtmux[0m.
+This terminal is equipped with [1;33mtmux and vim[0m.
 Keys
   Up/Down                     history
   Tab                         complete

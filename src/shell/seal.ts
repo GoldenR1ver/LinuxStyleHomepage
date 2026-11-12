@@ -1,6 +1,6 @@
 import { isGuestbook } from '../kernel/policy'
 import type { ShellCtx } from './context'
-import { stageSavedGuestbook } from './mailbox'
+import { pruneMissingDraft, stageSavedGuestbook } from './mailbox'
 
 /** Commit writes collected by one command. The caller aborts on failure. */
 export async function seal(ctx: ShellCtx): Promise<string> {
@@ -34,6 +34,7 @@ export async function seal(ctx: ShellCtx): Promise<string> {
 
   let note = ''
   if (ctx.user.role !== 'root') {
+    note += pruneMissingDraft(ctx)
     for (const path of touched.filter((item) => isGuestbook(item))) {
       note += stageSavedGuestbook(ctx, path)
     }

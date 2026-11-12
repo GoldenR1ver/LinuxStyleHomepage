@@ -60,3 +60,5 @@ export interface Stat {
 }
 
 export const MAX_FILE_BYTES = 256 * 1024
+/** Uploaded binary files are kept in this browser and downloaded with wget. */
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024

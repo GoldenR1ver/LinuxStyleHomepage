@@ -1,8 +1,38 @@
-method to leave me a message:
+Guestbook
 
-vim /var/guestbook/your-name.txt
-mail -m "subject"
-mail push
+Leave me a note. This directory is a normal file tree: write text,
+upload an attachment, copy a page you want to talk about, then mail it.
 
-mail add stages every text file in the local guestbook and /tmp/<you>. 
-A piped note can mention another page; that page's contents are not attached.
+1. Go to the guestbook
+  cd /var/guestbook
+
+2. Write a note
+  vim your-name.txt
+
+3. Add an attachment from your computer
+  scp
+  Choose one or more files in the browser dialog. They are copied to
+  this directory. Text files can be edited, copied, and mailed. Images
+  and other binary files stay in your browser and download with wget.
+
+4. Quote or reference my pages
+  cp /home/owner/about.txt quote.txt
+  echo "question about this section" | mail add /home/owner/about.txt
+  The second form mentions the page without attaching its contents.
+
+5. Stage and send
+  mail -m "subject"
+  mail add
+  mail push
+
+Useful file commands
+  cp source... dest       copy files; -r copies a directory
+  mv source... dest       move or rename
+  ls -l, cat, less, wc    inspect files
+
+Limits and privacy
+  Guests can write only under /var/guestbook and /tmp/<you>.
+  Upload text up to 256 KB and other files up to 2 MB.
+  mail add stages text files. Binary files are not sent with the letter.
+  Files and the draft stay in this browser. Other visitors cannot read
+  them. mail push sends one letter to the owner; it is not published.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { runLine } from './runner'
 import { boot } from '../testkit'
+import { MAX_UPLOAD_BYTES } from '../kernel/types'
 import { FsError } from '../kernel/vfs'
 
 const root = { name: 'root', role: 'root' as const }
@@ -56,6 +57,98 @@ describe('shell', () => {
     expect(sent.stdout).not.toContain('http')
     expect(rt.outbox.draft.files).toHaveLength(0)
     expect(rt.outbox.draft.subject).toBe('')
+  })
+
+  it('uploads text and binary files with scp, then copies and moves them', async () => {
+    const note = new TextEncoder().encode('hello upload\n')
+    const picture = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff])
+    const { ctx, fs } = boot({
+      picked: [
+        { name: 'note.txt', type: 'text/plain', size: note.byteLength, read: async () => note.buffer as ArrayBuffer },
+        {
+          name: 'picture.png',
+          type: 'image/png',
+          size: picture.byteLength,
+          read: async () => picture.buffer as ArrayBuffer,
+        },
+      ],
+    })
+    const uploaded = await runLine('scp /var/guestbook', ctx)
+    expect(uploaded.code).toBe(0)
+    expect(uploaded.stdout).toContain('/var/guestbook/note.txt')
+    expect(uploaded.stdout).toContain('binary')
+    expect(fs.read(ctx.user, '/var/guestbook/note.txt').content).toBe('hello upload\n')
+    const binary = fs.read(ctx.user, '/var/guestbook/picture.png')
+    expect(binary.encoding).toBe('binary')
+    expect(binary.url).toContain('data:image/png;base64,')
+    expect(binary.size).toBe(6)
+
+    expect((await runLine('cd /var/guestbook', ctx)).code).toBe(0)
+    expect((await runLine('cp note.txt copy.txt', ctx)).code).toBe(0)
+    expect((await runLine('mv picture.png shot.png', ctx)).code).toBe(0)
+    expect(fs.read(ctx.user, '/var/guestbook/copy.txt').content).toBe('hello upload\n')
+    expect(fs.exists(ctx.user, '/var/guestbook/picture.png')).toBe(false)
+    expect(fs.read(ctx.user, '/var/guestbook/shot.png').encoding).toBe('binary')
+    const downloaded = await runLine('wget shot.png', ctx)
+    expect(downloaded.code).toBe(0)
+    expect(downloaded.downloads?.[0]?.href).toContain('data:image/png;base64,')
+  })
+
+  it('keeps the draft in step when an uploaded note is renamed', async () => {
+    const note = new TextEncoder().encode('hello\n')
+    const { ctx, mail, rt } = boot({
+      picked: [
+        { name: 'note.txt', type: 'text/plain', size: note.byteLength, read: async () => note.buffer as ArrayBuffer },
+      ],
+      webhook: true,
+    })
+    expect((await runLine('cd /var/guestbook', ctx)).code).toBe(0)
+    expect((await runLine('scp', ctx)).code).toBe(0)
+    expect(rt.outbox.draft.files).toEqual(['/var/guestbook/note.txt'])
+    expect((await runLine('mv note.txt my-note.txt', ctx)).code).toBe(0)
+    expect(rt.outbox.draft.files).toContain('/var/guestbook/my-note.txt')
+    expect(rt.outbox.draft.files).not.toContain('/var/guestbook/note.txt')
+    await runLine('mail -m "renamed"', ctx)
+    expect((await runLine('mail push', ctx)).code).toBe(0)
+    expect(mail.notes[0]?.body).toContain('/var/guestbook/my-note.txt')
+    expect(mail.notes[0]?.body).not.toContain('/var/guestbook/note.txt')
+  })
+
+  it('refuses uploads outside the work tree and reports a cancelled chooser', async () => {
+    const data = new TextEncoder().encode('x')
+    const denied = boot({
+      picked: [
+        { name: 'note.txt', type: 'text/plain', size: data.byteLength, read: async () => data.buffer as ArrayBuffer },
+      ],
+    })
+    const refused = await runLine('scp /home/owner', denied.ctx)
+    expect(refused.code).toBe(1)
+    expect(refused.stderr).toContain('Permission denied')
+    expect(denied.fs.exists(denied.ctx.user, '/home/owner/note.txt')).toBe(false)
+
+    const cancelled = boot({ picked: null })
+    expect((await runLine('scp /var/guestbook', cancelled.ctx)).code).toBe(130)
+  })
+
+  it('refuses an oversized upload before reading it', async () => {
+    let read = false
+    const { ctx } = boot({
+      picked: [
+        {
+          name: 'big.bin',
+          type: 'application/octet-stream',
+          size: MAX_UPLOAD_BYTES + 1,
+          read: async () => {
+            read = true
+            return new ArrayBuffer(0)
+          },
+        },
+      ],
+    })
+    const result = await runLine('scp /var/guestbook', ctx)
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('larger')
+    expect(read).toBe(false)
   })
 
   it('lets root publish a file and roll it back', async () => {

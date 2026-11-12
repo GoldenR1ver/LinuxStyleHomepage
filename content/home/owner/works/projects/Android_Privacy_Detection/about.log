@@ -1,0 +1,16 @@
+Android Privacy Detection System
+
+[Link]:
+https://github.com/GoldenR1ver/Android-Privacy-Detection-Software
+
+[Application scenarios]:
+Checking what an app actually collects against what its privacy policy says. Useful for a compliance review, a classroom lab that must audit many apps, or a user who wants to know whether an exported data copy is complete.
+
+[effectiveness]:
+Policy extraction covered 23 apps and 9,639 sentences; only 1,053 of them (10.9%) gave an executable path, which is a finding in itself. The disclosure audit ran on 9 apps and produced 9/9 reports: 90 consistent items, [1;33m41 high-risk items observed but not declared[0m, and 6 declared but not observed. The consent audit compared before and after switching privacy controls on 15 apps; 7 still sent PII or tracker traffic after the switch, while Keep went from 67 flows to 1 and served as a positive control. Access-right copies were checked by hand on 5 apps.
+
+[advantage]:
+Evidence first: every verdict points back to a policy sentence, a static API, a runtime event, a network field or a copy file. Rules decide, and the LLM only suggests navigation paths and explains, so a result does not change between runs. Static, UI, Frida and mitm tracks are chosen per app, and one failing track does not stop the audit. Batches keep a job id, retry failures, resume, and archive logs and reports.
+
+[method]:
+Policy text is parsed into declared types; the APK is scanned for permissions, sensitive APIs, SDKs and trackers; the app is driven through its privacy pages while mitm and Frida record traffic and API calls. All sources merge into one observed set with provenance. A rule engine compares declared and observed to produce the disclosure verdict. Consent compares the same app before and after the switch. Access subtracts the fields in the copy from the fields seen at runtime. Each finding carries a strength level from S0 (policy only) to S5 (user copy).

@@ -23,7 +23,7 @@ Files in `content/` are the filesystem visitors see.
 | `content/home/owner/about.md`     | `/home/owner/about.md`   |
 | `content/home/owner/projects/`    | projects                 |
 | `content/home/owner/notes/`       | notes                    |
-| `content/var/guestbook/README.md` | guestbook note           |
+| `content/var/guestbook/about.txt` | guestbook instructions   |
 | `content/etc/motd`                | line printed after login |
 | `content/etc/issue`               | lines printed before login |
 
@@ -70,17 +70,23 @@ A guest write must also fall under `/tmp/<name>` or `/var/guestbook/`. Public pa
 1. Set `github.owner`, `github.repo`, and `github.branch` in `site.ts`.
 2. Log in as root and run `github auth` with a token that can read and write Contents.
 3. The token stays in this browser.
-4. Later `echo`, `tee`, `mkdir`, `rm`, `cp`, and `mv` from root become one commit, message `homepage: <command>`.
+4. Later `echo`, `tee`, `mkdir`, `rm`, `cp`, `mv`, and text uploads with `scp` from root become one commit, message `homepage: <command>`.
 
 Other visitors see the file after GitHub Pages redeploys. This browser sees it immediately. Without a token the command fails and the server file is unchanged.
 
 ## Guestbook and mail
 
 ```sh
-vim /var/guestbook/your-name.txt
+cd /var/guestbook
+vim your-name.txt
+scp                        # choose local files to upload here
+cp /home/owner/about.txt quote.txt
+mv quote.txt about-quote.txt
 mail -m "subject"
 mail push
 ```
+
+`scp` opens the browser's file chooser and copies the selected files into the current directory, or into the directory named by `scp <dir>`. Text up to 256 KB becomes a normal editable file. Larger or binary files up to 2 MB stay in the browser; `wget` downloads them, and the GitHub commit path does not publish them. `cp` and `mv` work on both kinds, so a guest can copy one of the published pages into the guestbook before mailing it.
 
 `mail add` stages every text file in the local guestbook and `/tmp/<you>`. A piped note can mention another page; that page's contents are not attached.
 
@@ -175,4 +181,4 @@ vite/content.ts          packs content/ into the site
 - The root password is not authentication. Remote writes trust the GitHub token in this browser. `mail push` does not use that token.
 - Guest drafts, guestbook notes, and the log live in the browser. Another computer does not have them. The owner reads a pushed letter in the relay mailbox.
 - There is no command substitution, no background jobs, and no full VT100 emulator.
-- Binary files can be downloaded. Root cannot edit them from the shell. Replace the file under `content/` and rebuild.
+- Binary files can be downloaded. Root cannot edit or publish them from the shell. `scp` keeps uploaded binaries in this browser. Replace the file under `content/` and rebuild to publish one.

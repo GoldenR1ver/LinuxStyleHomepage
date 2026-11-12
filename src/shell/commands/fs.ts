@@ -1,10 +1,11 @@
-import { applyMode, formatMode } from '../../kernel/policy'
+import { applyMode, canWrite, formatMode } from '../../kernel/policy'
 import { basename, isInside } from '../../kernel/path'
 import { displayWidth, padEndDisplay } from '../../kernel/width'
 import { FsError } from '../../kernel/vfs'
-import type { Stat } from '../../kernel/types'
+import { MAX_FILE_BYTES, MAX_UPLOAD_BYTES, type Stat } from '../../kernel/types'
 import type { ShellCtx } from '../context'
 import { matchGlob } from '../glob'
+import type { PickedFile } from '../host'
 import type { CommandSpec } from './types'
 import { errorMessage, flags, joinPath, resolvePath, splitLines, writeFile } from './helpers'
 
@@ -250,7 +251,8 @@ export const fileCommands: CommandSpec[] = [
     group: 'file',
     summary: 'copy files',
     usage: 'cp [-r] source... dest',
-    manual: 'Copying a directory requires -r. Binary files can be copied only into /tmp.',
+    manual:
+      'Copying a directory requires -r. A guest can copy a binary file only into /tmp/<name> or /var/guestbook. Root cannot publish a binary file.',
     run(ctx, args) {
       const { set, rest } = flags(args, 'rR')
       if (rest.length < 2) throw new FsError('EINVAL', 'missing operand')
@@ -268,11 +270,56 @@ export const fileCommands: CommandSpec[] = [
     },
   },
   {
+    name: 'scp',
+    group: 'file',
+    summary: 'upload local files',
+    usage: 'scp [directory]',
+    manual: [
+      'Copy files from your computer into the site filesystem. With no argument the files go to the current directory. A file chooser opens in the browser; a path typed at the prompt is not read from your disk.',
+      `Text files up to ${Math.round(MAX_FILE_BYTES / 1024)} KB become ordinary files that cat, cp, mv, md, and mail add can use. Larger or binary files up to ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB stay in this browser, cat refuses them, and wget downloads them. A guest may upload only under /var/guestbook or /tmp/<name>.`,
+    ].join('\n\n'),
+    async run(ctx, args) {
+      if (args.length > 1) throw new FsError('EINVAL', 'usage: scp [directory]')
+      const destArg = args[0] ?? '.'
+      if (destArg.startsWith('-')) throw new FsError('EINVAL', `invalid option -- ${destArg}`)
+      const dest = resolvePath(ctx, destArg)
+      const destStat = ctx.rt.fs.stat(ctx.user, dest)
+      if (destStat.type !== 'dir') throw new FsError('ENOTDIR', `${destArg}: Not a directory`)
+      if (!canWrite(ctx.user, joinPath(dest, 'upload'))) {
+        throw new FsError(
+          'EACCES',
+          `Permission denied. Guests upload only under /var/guestbook or /tmp/${ctx.user.name}.`,
+        )
+      }
+      const picked = await ctx.host.pickFiles({ multiple: true })
+      if (picked === null) return { code: 130, stderr: 'scp: cancelled\n' }
+      if (!picked.length) return { code: 1, stderr: 'scp: no files selected\n' }
+      const plans = picked.map((file) => planUpload(dest, file))
+      const lines: string[] = []
+      for (const plan of plans) {
+        const data = await plan.file.read()
+        const size = data.byteLength
+        if (size > MAX_UPLOAD_BYTES) {
+          throw new FsError('EINVAL', `${basename(plan.path)}: file is larger than ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB`)
+        }
+        const text = size <= MAX_FILE_BYTES ? decodeText(data) : null
+        if (text !== null) {
+          ctx.rt.fs.write(ctx.user, plan.path, text)
+          lines.push(`uploaded ${plan.path} (${formatBytes(size)}, text)\n`)
+        } else {
+          ctx.rt.fs.writeBinary(ctx.user, plan.path, binaryUrl(plan.file.type, data), size)
+          lines.push(`uploaded ${plan.path} (${formatBytes(size)}, binary; wget downloads it)\n`)
+        }
+      }
+      return { code: 0, stdout: lines.join('') }
+    },
+  },
+  {
     name: 'mv',
     group: 'file',
     summary: 'move or rename',
     usage: 'mv source... dest',
-    manual: 'If the destination is a directory, the source is moved into it.',
+    manual: 'If the destination is a directory, the source is moved into it. Binary files follow the same rule as cp.',
     run(ctx, args) {
       if (args.length < 2) throw new FsError('EINVAL', 'missing operand')
       const destArg = args[args.length - 1] ?? ''
@@ -641,6 +688,52 @@ function copyPath(ctx: ShellCtx, from: string, to: string, recursive: boolean) {
     return
   }
   ctx.rt.fs.cloneFile(ctx.user, from, to)
+}
+
+interface UploadPlan {
+  file: PickedFile
+  path: string
+}
+
+function planUpload(dir: string, file: PickedFile): UploadPlan {
+  const name = uploadName(file.name)
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new FsError('EINVAL', `${name}: file is larger than ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB`)
+  }
+  return { file, path: joinPath(dir, name) }
+}
+
+function decodeText(data: ArrayBuffer): string | null {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(data).replace(/\r\n/g, '\n')
+  } catch {
+    return null
+  }
+}
+
+function uploadName(raw: string): string {
+  const name = raw.replace(/^.*[\\/]/, '').trim()
+  if (!name || name === '.' || name === '..' || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name)) {
+    throw new FsError('EINVAL', `${raw || '(unnamed)'}: invalid file name`)
+  }
+  return name
+}
+
+function binaryUrl(mime: string, data: ArrayBuffer): string {
+  const bytes = new Uint8Array(data)
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  const type = /^[\w.+-]+\/[\w.+-]+$/.test(mime) ? mime : 'application/octet-stream'
+  return `data:${type};base64,${btoa(binary)}`
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function existsDir(ctx: ShellCtx, path: string): boolean {

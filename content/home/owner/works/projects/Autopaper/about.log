@@ -1,0 +1,16 @@
+AutoPaper
+
+[Link]:
+https://github.com/GoldenR1ver/AutoPaper
+
+[Application scenarios]:
+Students and researchers who keep a reading list on one topic and want it to stay current. Also useful for a lab handover: one folder holds the records, the PDFs and the notes. Search, dedupe, filter, sort and export work without a model key; reading and writing assistance need one.
+
+[effectiveness]:
+A topic can be run end to end. It searches five sources (arXiv, Crossref, OpenAlex, PubMed, Semantic Scholar), merges duplicates, filters and scores, then leaves a candidate list, a structured note for each paper you read, and a ZIP with CSV / JSON / BibTeX / Markdown plus the PDFs. A paper is read into a fixed set of questions: background, problem, method, experiments, results, and what is still open. When only an abstract exists, the note says the evidence is insufficient instead of filling the gap.
+
+[advantage]:
+Local first: records live in SQLite, PDFs and notes in plain folders, so copying data/ is a full backup. A topic saves its query, terms, exclusions, sources and start year, so the same search can be re-run every year. The machine does the labor of search, dedupe, filter, score and draft; the human decides what stays. Generated text is limited to the supplied papers, and missing facts are marked rather than invented.
+
+[method]:
+Collect → dedupe and filter → score and triage → read → archive and export. Five sources are normalised into one Paper record and deduped by DOI and title. Keyword coverage, citations and year give a score, and a model re-ranks the top N with a one-line reason. Archived papers enter a library and a reader that pairs a structured note with the PDF; highlights, comments and follow-up answers are saved into the same note. Finally, a topic is narrowed by score and count and packed into a ZIP.

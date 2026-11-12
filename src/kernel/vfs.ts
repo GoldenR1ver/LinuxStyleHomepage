@@ -2,6 +2,7 @@ import { basename, dirname, normalize, parentChain } from './path'
 import { canWrite, createdMode, modePermits, publishes, shippedMode } from './policy'
 import {
   MAX_FILE_BYTES,
+  MAX_UPLOAD_BYTES,
   type DirNode,
   type Entry,
   type FileNode,
@@ -241,6 +242,41 @@ export class VirtualFS {
     } else {
       this.local.set(path, node)
     }
+    this.steps.push(step)
+    this.writes.push(path)
+  }
+
+  /**
+   * Store an uploaded binary in the browser layer.
+   * A data URL keeps the bytes in IndexedDB, and wget downloads them again.
+   * The published layer stays text-only, so root cannot upload a binary.
+   */
+  writeBinary(user: User, raw: string, url: string, size: number) {
+    this.assertTx()
+    const path = normalize(raw)
+    if (path === '/') throw new FsError('EISDIR', 'Is a directory')
+    if (!url.startsWith('data:')) throw new FsError('EINVAL', 'invalid binary data')
+    if (size > MAX_UPLOAD_BYTES) throw new FsError('EINVAL', 'File too large')
+    if (publishes(user, path)) throw new FsError('EINVAL', 'cannot publish a binary file')
+    this.prepareFile(user, path)
+    const existing = this.lookup(path)
+    if (user.role !== 'root' && existing.node && existing.from !== 'local') {
+      throw new FsError('EACCES', 'Permission denied')
+    }
+    const step = this.capture(path)
+    const prior = existing.node?.type === 'file' ? existing.node : null
+    const node: FileNode = {
+      type: 'file',
+      content: '',
+      encoding: 'binary',
+      url,
+      size,
+      mtime: Date.now(),
+      mode: prior?.mode ?? createdMode(path, 'file'),
+      uid: prior?.uid ?? user.name,
+      gid: prior?.gid || prior?.uid || user.name,
+    }
+    this.local.set(path, node)
     this.steps.push(step)
     this.writes.push(path)
   }

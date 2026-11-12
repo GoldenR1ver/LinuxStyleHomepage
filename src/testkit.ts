@@ -6,6 +6,7 @@ import type { User } from './kernel/types'
 import { VirtualFS } from './kernel/vfs'
 import { MemoryMail, MemoryRemote } from './remote/memory'
 import { createOutbox } from './remote/outbox'
+import type { PickedFile } from './shell/host'
 
 const files = {
   '/etc/motd': 'welcome\n',
@@ -23,6 +24,7 @@ export function boot(options?: {
   authenticated?: boolean
   configured?: boolean
   webhook?: boolean
+  picked?: PickedFile[] | null
 }) {
   const user = options?.user ?? { name: 'ada', role: 'guest' as const }
   const fs = VirtualFS.fromFiles(files)
@@ -62,6 +64,9 @@ export function boot(options?: {
     },
     async askSecret() {
       return secret
+    },
+    async pickFiles() {
+      return options?.picked ?? null
     },
   }
   return { ctx, rt, fs, remote, mail }

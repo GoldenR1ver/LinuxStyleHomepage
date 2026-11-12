@@ -1,0 +1,18 @@
+DoJot
+
+[Link]:
+https://github.com/GoldenR1ver/DoJot-Mahjong-script
+
+[Application scenarios]:
+Players of Mahjong Soul (雀魂) who want to hand a match to a bot, or to get a second opinion on a discard. It is also a sandbox for testing discard and defense heuristics, because every decision is logged.
+
+One caveat: the game now draws the table with Unity elements, so the in-page panel does not mount at the moment. The logic and the userscript are unchanged.
+
+[effectiveness]:
+Four days of unattended four-player ranked play took the account from [1;33mExpert 1★ 200 to Expert 3★ 1,361[0m. Defense is the strongest part. In one game the bot declined tenpai twice on the last turns instead of dealing into a big hand. In another, it kept folding while an opponent held a guaranteed four-han hand. In Help mode it only highlights a recommended tile and waits for the player.
+
+[advantage]:
+One userscript file, no dependencies: drop it into Tampermonkey and it runs. The decision logic is an interpretable weighted heuristic, so a strange discard can be traced in the log instead of guessed. The weights were tuned offline on exported match data (2.2.0 is the last release that ships that loop), which is why folding is so heavy: in the room it trained in, second place gains a lot and third loses little, so avoiding fourth matters more than chasing first.
+
+[method]:
+Each turn reads the table state and walks one discard chain: discard() → getTilePriorities → sortOutUnsafeTiles → getDiscardTile / discardFold. Every candidate tile gets a priority from hand efficiency and a danger value estimated from what the most threatening opponent has already discarded. When danger passes a threshold, the bot drops the hand and plays only safe tiles. Offline, a Gaussian-process Bayesian optimizer retunes the parameter groups against logged matches.

@@ -33,6 +33,9 @@ export function createShell(rt: Runtime, user: User, cwd: string): ShellCtx {
       async askSecret() {
         return null
       },
+      async pickFiles() {
+        return null
+      },
     },
     columns: 80,
     closing: false,

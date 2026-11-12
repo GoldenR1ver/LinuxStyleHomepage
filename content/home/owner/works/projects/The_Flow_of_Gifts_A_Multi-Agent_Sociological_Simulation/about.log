@@ -1,0 +1,41 @@
+The Flow of Gifts
+
+[Link]:
+https://github.com/GoldenR1ver/AI-town
+
+[Application scenarios]:
+Social science and generative-agent research: testing an ethnographic claim about gift exchange by running it. Also a teaching demo: a 16-person, 10-act story replays in the browser without an API key.
+
+[effectiveness]:
+100 agents, 365 days, DeepSeek, seed=42: [1;33mreciprocity 0.90, default 0.022, average repay delay ~17 slots[0m. Gifts follow prestige (0.51) rather than money (0.07); prestige gini is 0.16 and the top 10 take 27% of gifts. All 344 dialogues passed the speech-state check. Turning off any one component degrades the phenomenon it carries.
+
+[advantage]:
+The LLM only talks. It proposes words and intentions; the RuleEngine alone writes money, gifts, debts and relationships, so every result can be settled, logged and replayed.
+
+Each of the nine parts stands on published work, but the combination is mine: nine switchable mechanisms in one world, where a claim is tested by turning it off instead of tuning one good number. Three pairings work better than I expected.
+
+- Cognitive tree × relationship graph. The edge is the objective relation; the tree is the relation as remembered. That split gives long-horizon continuity, and without it gifts drift one way up the status ladder.
+- BDIE × Big Five. State explains the week (broke, stressed, a debt due), personality explains the person (introverted, picky, spiteful). Remove either and the village becomes an average agent.
+- Event system × world engine. Events decide when something happens and who meets whom; the clock, state and settlement stay in the engine. Dialogue never moves either.
+
+[method]:
+Nine components in five layers. Each stands on a known framework and adds the one thing that framework cannot give.
+
+Trigger
+  8 Event system: public affairs, visits, gossip, repayment attempts. Discrete-event simulation; added, initiation is driven by personality and emotion, so timing bursts instead of running flat.
+
+Expression
+  6 Dialogue: two-person, host and group modes. Generative agents (Park et al.); added, the prompt uses the same variables as settlement and may not claim world changes.
+
+Memory
+  5 PET personal event table: each agent's own recent events with confidence. From episodic memory; added, propagation follows visibility, so agents remember different things.
+  4 Cognitive tree: social, circle, relation, dialogue; summaries promoted by accumulated influence. From Park et al.'s memory stream, made hierarchical; added, promotion becomes subjective relationship memory and returns to later prompts.
+
+Cognition
+  3 BDIE: belief, desire, intention plus mood, arousal, stress and energy. From BDI (Rao and Georgeff) and OCC appraisal (Ortony et al.); added, a near-due gift debt is lifted to priority 95-99 and becomes repay urgency.
+  9 Personality: Big Five mapped to introversion, pickiness and spitefulness. From Costa and McCrae; added, the three only set refusal and gossip probabilities, never the outcome.
+
+Settlement
+  1 RuleEngine + gift ledger: the only write gate, with pending, replied, defaulted and closed, and windows W4-W10. From institutional simulation and Yan Yunxiang's gift theory; added, the window and vertical exemption make delay and asymmetry emerge rather than be scripted.
+  2 Relationship graph: directed edges carrying trust, intimacy, dislike and debt, plus a vertical axis and social basis. From signed network theory; added, the axis, which is the only carrier of vertical asymmetry.
+  7 Economy: living cost, wages, savings and gift expectation checks. From budget-constrained agents; added, an affordability factor that turns "has money" into "can repay".

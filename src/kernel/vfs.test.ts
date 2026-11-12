@@ -39,6 +39,22 @@ describe('vfs', () => {
     expect(tree.read(ada, '/home/owner/about.md').content).toBe('v1\n')
   })
 
+  it('keeps an uploaded binary in the browser layer', () => {
+    const tree = fs()
+    tree.begin()
+    tree.writeBinary(ada, '/var/guestbook/shot.png', 'data:image/png;base64,AA==', 1)
+    const changes = tree.pendingChanges()
+    tree.finish()
+    expect(changes).toEqual([])
+    const node = tree.read(ada, '/var/guestbook/shot.png')
+    expect(node.encoding).toBe('binary')
+    expect(node.url).toBe('data:image/png;base64,AA==')
+    expect(node.size).toBe(1)
+    tree.begin()
+    expect(() => tree.writeBinary(root, '/home/owner/shot.png', 'data:image/png;base64,AA==', 1)).toThrow(FsError)
+    tree.abort()
+  })
+
   it('records an inverse patch when root edits a published file', () => {
     const tree = fs()
     tree.begin()

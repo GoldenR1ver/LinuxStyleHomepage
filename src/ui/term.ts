@@ -1,3 +1,4 @@
+import type { PickOptions, PickedFile } from '../shell/host'
 import { parseAnsi } from './ansi'
 
 export interface Prompt {
@@ -214,6 +215,45 @@ export class TermView {
     const result = await this.wait()
     this.input.classList.remove('secret')
     return result.type === 'submit' ? result.value : null
+  }
+
+  async pickFiles(options?: PickOptions): Promise<PickedFile[] | null> {
+    this.print('(choose files from your computer)\n', 'dim')
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = options?.multiple ?? true
+    if (options?.accept) input.accept = options.accept
+    input.hidden = true
+    this.el.append(input)
+    const chosen = await new Promise<File[] | null>((resolve) => {
+      let settled = false
+      let timer = 0
+      function finish(value: File[] | null) {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        window.removeEventListener('focus', onFocus)
+        input.remove()
+        resolve(value)
+      }
+      function onFocus() {
+        timer = window.setTimeout(() => {
+          if (!input.files?.length) finish(null)
+        }, 500)
+      }
+      input.addEventListener('change', () => finish(input.files ? Array.from(input.files) : []))
+      input.addEventListener('cancel', () => finish(null))
+      // The cancel event is recent. Focus back on the window also means the chooser closed.
+      window.addEventListener('focus', onFocus)
+      input.click()
+    })
+    this.focusIfActive()
+    if (!chosen) return null
+    const picked: PickedFile[] = []
+    for (const file of chosen) {
+      picked.push({ name: file.name, type: file.type, size: file.size, read: () => file.arrayBuffer() })
+    }
+    return picked
   }
 
   async readStdin(): Promise<string | null> {
