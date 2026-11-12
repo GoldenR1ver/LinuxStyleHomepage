@@ -1,0 +1,19 @@
+NJUDB
+
+[Link]:
+https://github.com/GoldenR1ver/NJU_DBPractice
+
+[Application scenarios]:
+A teaching relational database that runs a SQL subset end to end: parser, planner, optimizer, executor, storage, index, concurrency and recovery. I implemented the two lowest layers, so it is a reference for anyone who wants to see what sits under SQL -- page layout, eviction, record addressing, tree maintenance -- with nothing hidden by an engine, and a base for the course labs. The other modules keep the framework's interfaces or placeholders.
+
+[effectiveness]:
+[1;33m19/19 GoogleTest cases pass on the B+ tree, including a 100,000-key build and range scan[0m. At 10,000 keys, random inserts take 816 ms and deleting every other key takes 906 ms; a 10,000-operation mix of insert, delete and search finishes in 1.26 s, leaving 7,513 keys in the tree, and the 100,000-key run takes 31.2 s. The storage suites pass as well -- LRU, LRU-K, buffer pool manager, TableHandle, and both the NAry row and PAX column page handles. Two modules go beyond the required work: PAX page storage and a hash index.
+
+[advantage]:
+The part I care about is where the invariants are enforced, not the feature list. Every FetchPage has a matching Unpin, and the PageGuard returns are RAII, so an exception path cannot leak the buffer pool; a frame only becomes evictable when its pin count reaches zero, and a dirty frame is written back before eviction, deletion or reset. When no frame can be freed the pool raises NJUDB_NO_FREE_FRAME instead of handing back a null pointer. Above it, a free-page list in the table header makes insertion O(1), and the B+ tree keeps the leaf chain, parent pointers and separator keys consistent through split, redistribute and coalesce, with IsSafe centralizing overflow and underflow. The index is guarded by a shared_mutex, the scan operator pushes predicates into index bounds but always rechecks every condition on the base table, and row/column storage and B+ tree/hash index sit side by side so the tradeoff is explicit.
+
+[method]:
+Storage: DiskManager to BufferPoolManager to PageHandle to TableHandle. The buffer pool owns a fixed frame array, a free list and a page-to-frame map; LRU is a list plus a hash map, and LRU-K adds a timestamp history per frame and evicts by backward K distance. PageHandle interprets slots through a bitmap and a page header, and PAX precomputes each column's offset at construction, so ReadChunk deserializes only the projected columns. Index: B+ tree pages store fixed-width keys and RIDs at computed offsets; insertion splits upward and creates a new root at the top, deletion coalesces or redistributes and adjusts the root, and SearchRange walks the leaf chain from a lower bound. IndexHandle extracts keys from full records and only deletes and reinserts when the key actually changes. IdxScan turns leftmost-prefix predicates into a low/high bound, fills unspecified columns with type min/max, and filters the remaining conditions after the base-table lookup.
+
+[C++]:
+C++17, CMake, GoogleTest. Pages are raw char* buffers; headers, bitmaps, slots and column areas are addressed by computed offsets, so record access needs no deserialization and no extra allocation. The right structure is used for each job -- std::list and std::unordered_map for O(1) LRU, std::shared_mutex to separate index readers from writers, std::lock_guard and RAII page guards for exception safety, and fixed-width serialization so keys and RIDs never need parsing. All of it is covered by GoogleTest, including the 100,000-key tree.

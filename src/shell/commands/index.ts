@@ -77,7 +77,7 @@ Guestbook
   [1;33mcd /var/guestbook to write a note or add an attachment[0m
   vim your-name.txt                 write your note
   scp                               upload files from this computer
-  cp /home/owner/about.txt quote.txt  copy a page into your note
+  cp /home/owner/a.txt b.txt        copy a page into your note
   mv old.txt new.txt                move or rename
   mail -m "subject"
   mail add

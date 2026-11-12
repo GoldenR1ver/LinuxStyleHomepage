@@ -1,0 +1,19 @@
+Tai-e Software Analysis
+
+[Link]:
+https://github.com/GoldenR1ver/NJU-Software-Analysis-Tai-e-assignments
+
+[Application scenarios]:
+A course-long build-up on Tai-e, the Java static analysis framework: eight assignments that start from one data-flow equation and end at a taint-analysis client running on context-sensitive pointer analysis. It is a reference for anyone who wants to extend a real analysis framework rather than write a toy one, and a worked example of the tradeoff that runs through the whole field -- precision against cost.
+
+[effectiveness]:
+[1;33mEight assignments, all passing the tests shipped with the course[0m: live variables with a backward iterative solver; constant propagation with a three-value lattice and a work-list solver; dead code detection built on both; CHA plus interprocedural constant propagation; context-insensitive pointer analysis; context-sensitive pointer analysis with 1-call, 1-obj, 1-type and k = 2 selectors; alias-aware constant propagation through fields and arrays; and taint analysis over the context-sensitive result. Later assignments consume the earlier ones as data, so the last one runs on a chain of five analyses.
+
+[advantage]:
+The part I care about is where each analysis draws its boundary. The framework owns the IR, the CFG and ICFG, the call graph container, the heap model and the scheduling; my code supplies only the lattice, the transfer function and the rules that add graph edges. That split is what makes reuse possible: the interprocedural analysis reuses the intraprocedural one instead of copying it, the context-sensitive solver reuses the context-insensitive loop, and taint analysis reuses pointer analysis instead of recomputing points-to sets. Precision is bought deliberately too -- CHA over-approximates on purpose, and the six selectors let one solver move along the 1-call / 1-obj / 1-type dial with a k = 2 variant on top. Conservatism is explicit rather than accidental: side effects, division by zero and array indices each get one function that decides, so the places where the analysis is allowed to be wrong are visible.
+
+[method]:
+A1 fixes the skeleton: facts, meet, transfer, fixed point. A2 swaps in the UNDEF / constant / NAC lattice and replaces the full scan with a work list. A3 turns facts into decisions, pruning infeasible edges with constant propagation and dead stores with liveness. A4 adds transfer functions on call, call-to-return and return edges, and resolves targets with CHA. A5 introduces the two objects every pointer analysis needs -- points-to sets and a pointer flow graph -- and grows the graph while solving, propagating only the delta. A6 wraps methods, variables and objects in contexts and adds the six selectors. A7 feeds alias information from pointer analysis into constant propagation so values cross fields and arrays, and wakes dependent loads when a store changes. A8 marks objects as tainted, propagates them along a second graph and reports each sink flow with the source call site that produced it.
+
+[Java]:
+The language is used to fit into the framework, not to decorate it. Generics carry the analysis contract -- AbstractDataflowAnalysis<Stmt, SetFact<Var>> and InterSolver<Method, Node, Fact> -- so one solver serves every lattice. ContextSelector is six implementations of one interface, which makes sensitivity a swap rather than a rewrite. Statement rules are a visitor, with a non-static inner class that reaches solver state without threading arguments through every call. instanceof pattern matching binds and tests in one step, switch over enums is exhaustive by construction, and ListContext is immutable, so contexts can be cached and used as keys. Optional carries absent definitions, streams replace hand-written loops, ArrayDeque states queue-versus-stack intent, and factory methods keep points-to sets behind a single entry point.
