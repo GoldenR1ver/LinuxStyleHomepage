@@ -107,7 +107,8 @@ export const systemCommands: CommandSpec[] = [
     group: 'system',
     summary: 'define aliases',
     usage: "alias [name=value...]",
-    manual: "For example alias ll='ls -l'. An alias replaces only the first word and cannot contain a pipe.",
+    manual:
+      "An alias is text replaced in place before parsing, so it may contain a pipe: alias p='ls -l | wc -l'. It replaces only the first word, so it works only at the start of a command, and it takes no arguments. Use a function when you need $1. A name that a function already owns is refused; run unfunction first.",
     run(ctx, args) {
       if (!args.length) {
         const lines = Object.keys(ctx.aliases)
@@ -122,7 +123,10 @@ export const systemCommands: CommandSpec[] = [
           if (value === undefined) throw new FsError('EINVAL', `${arg}: not found`)
           return { code: 0, stdout: `alias ${arg}='${value}'\n` }
         }
-        ctx.aliases[arg.slice(0, index)] = arg.slice(index + 1)
+        const name = arg.slice(0, index)
+        if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) throw new FsError('EINVAL', `invalid alias name ${name}`)
+        if (name in ctx.functions) throw new FsError('EINVAL', `${name}: a function has that name; run unfunction first`)
+        ctx.aliases[name] = arg.slice(index + 1)
       }
       return { code: 0 }
     },
@@ -138,6 +142,39 @@ export const systemCommands: CommandSpec[] = [
       for (const name of args) {
         if (!(name in ctx.aliases)) throw new FsError('EINVAL', `${name}: not found`)
         delete ctx.aliases[name]
+      }
+      return { code: 0 }
+    },
+  },
+  {
+    name: 'functions',
+    group: 'system',
+    summary: 'list shell functions',
+    usage: 'functions [name...]',
+    manual:
+      'Print functions defined in this pane, or just the names given. They are not saved: a refresh brings back only the built-in command table. A function body is one line, may not define another function, and may not use a builtin command name.',
+    run(ctx, args) {
+      const names = args.length ? args : Object.keys(ctx.functions).sort()
+      if (args.length) {
+        for (const name of names) {
+          if (!(name in ctx.functions)) return { code: 1, stderr: `functions: ${name}: not found\n` }
+        }
+      }
+      const lines = names.map((name) => `${name}() { ${ctx.functions[name] ?? ''}; }`)
+      return { code: 0, stdout: lines.length ? `${lines.join('\n')}\n` : '' }
+    },
+  },
+  {
+    name: 'unfunction',
+    group: 'system',
+    summary: 'remove shell functions',
+    usage: 'unfunction name...',
+    manual: 'Remove functions from this pane. unfunction without a name is refused, so a typo cannot clear every function.',
+    run(ctx, args) {
+      if (!args.length) throw new FsError('EINVAL', 'missing operand')
+      for (const name of args) {
+        if (!(name in ctx.functions)) throw new FsError('EINVAL', `${name}: not found`)
+        delete ctx.functions[name]
       }
       return { code: 0 }
     },

@@ -4,7 +4,10 @@ This is a Linux-terminal-style personal homepage, whose operating habits and fil
 
 Of course, you can make whatever modifications you like to the files locally — they will not be uploaded to the server.
 
-Also, this terminal is equipped with tmux and vim, you can type help for more detailed information. For PDF or Markdown files, you can use command pdf or md to view them on your browser. Using wget to download it locally.
+Also, this terminal is equipped with tmux and vim, and a small shell with pipes,
+aliases and one-line functions such as greet() { echo "hi $1"; }. Type help for
+more detailed information. For PDF or Markdown files, you can use command pdf or
+md to view them on your browser. Using wget to download it locally.
 
 /
 |-- etc

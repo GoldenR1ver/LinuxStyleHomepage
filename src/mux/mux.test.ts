@@ -8,6 +8,8 @@ function ctx(): ShellCtx {
     cwd: '/home/owner',
     env: {},
     aliases: {},
+    functions: {},
+    args: [],
     history: [],
     rt: {} as ShellCtx['rt'],
     host: {

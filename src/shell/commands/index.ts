@@ -79,15 +79,26 @@ Guestbook
   scp                               upload files from this computer
   cp /home/owner/a.txt b.txt        copy a page into your note
   mv old.txt new.txt                move or rename
+  mail status                      show the staging area
   mail -m "subject"
-  mail add
+  mail add .                       stage text files in this directory
   mail push
-  Text files are staged by mail add. Binary uploads stay in your browser; wget downloads them.
+  mail reset                       unstage everything
+  Text files are staged by mail add . Binary uploads stay in your browser; wget downloads them.
   echo "question" | mail add /home/owner/about.txt   comment on a page without attaching it
   The note stays in your browser. Mail push notifies the owner. It is not published.
 
 Scratch
   ~                           /tmp/<you>, this browser only
+
+Shell functions
+  [1;33mname() { commands; }[0m         define, all on one line
+  greet() { echo "hi $1"; }        $1..$9, $#, $@
+  greet ada                        call it
+  functions                        list this pane's functions
+  unfunction greet                 remove one
+  A function may call another at most 6 levels deep. It replaces no builtin,
+  may not define another function, and is not saved across a refresh.
 
 This terminal is equipped with [1;33mtmux and vim[0m.
 Keys
@@ -159,12 +170,14 @@ function metaCommands(all: CommandSpec[]): CommandSpec[] {
       group: 'site',
       summary: 'locate a command',
       usage: 'which command',
-      manual: 'Look up a name in the built-in command table.',
-      run(_ctx, args) {
+      manual: 'Look up a name in the built-in command table, then in this pane\'s functions and aliases.',
+      run(ctx, args) {
         const name = args[0]
         if (!name) return { code: 1, stderr: 'which: missing command\n' }
-        if (!all.some((item) => item.name === name)) return { code: 1, stderr: `which: ${name}: not found\n` }
-        return { code: 0, stdout: `${name}\n` }
+        if (all.some((item) => item.name === name)) return { code: 0, stdout: `${name}\n` }
+        if (name in ctx.functions) return { code: 0, stdout: `${name} (function)\n` }
+        if (name in ctx.aliases) return { code: 0, stdout: `${name} (alias)\n` }
+        return { code: 1, stderr: `which: ${name}: not found\n` }
       },
     },
   ]

@@ -1,0 +1,19 @@
+Project name
+
+[Link]:
+https://github.com/you/project
+
+[Application scenarios]:
+Who needs this and what they get. Name the concrete task, not the technology.
+
+[effectiveness]:
+The measured result. Put the one number that matters in the highlight color: tests that pass, latency, accuracy, scale.
+
+[advantage]:
+Where the boundaries are drawn and why that is the right place. What cannot go wrong by construction.
+
+[method]:
+The path from input to output, one step per sentence, then the one mechanism that is not obvious.
+
+[C++]:
+Language and build. The primitive chosen for each job and why, then how it is tested.

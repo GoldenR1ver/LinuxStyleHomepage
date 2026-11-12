@@ -11,6 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "check:logs": "node scripts/check-logs.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

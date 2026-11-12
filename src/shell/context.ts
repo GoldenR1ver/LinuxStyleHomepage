@@ -7,6 +7,10 @@ export interface ShellCtx {
   cwd: string
   env: Record<string, string>
   aliases: Record<string, string>
+  /** Bodies defined with name() { ... }. Kept in this pane only. */
+  functions: Record<string, string>
+  /** Positional arguments of the running function: $1, $2, ... */
+  args: string[]
   history: string[]
   rt: Runtime
   host: Host

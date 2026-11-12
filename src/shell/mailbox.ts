@@ -59,11 +59,16 @@ export function pruneMissingDraft(ctx: ShellCtx): string {
   return `dropped ${dropped.join(', ')} from the draft (missing).\n`
 }
 
-export function stageWorktree(ctx: ShellCtx, stdin: string): { lines: string; error: string } {
-  const paths = [...localTexts(ctx.rt.fs).entries()]
+/** Every text file the guest can stage, sorted. */
+export function worktreeFiles(ctx: ShellCtx): string[] {
+  return [...localTexts(ctx.rt.fs).entries()]
     .filter(([path, text]) => isWorktreePath(ctx.user, path) && text.trim() && readable(ctx, path))
     .map(([path]) => path)
-    .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    .sort(byPath)
+}
+
+export function stageWorktree(ctx: ShellCtx, stdin: string): { lines: string; error: string } {
+  const paths = worktreeFiles(ctx)
   const lines: string[] = []
   if (!paths.length && !stdin.trim()) {
     return {
@@ -85,41 +90,125 @@ export function stageWorktree(ctx: ShellCtx, stdin: string): { lines: string; er
   return { lines: lines.join(''), error: '' }
 }
 
-export function stageAddedPath(ctx: ShellCtx, input: string, stdin: string): { line: string; error: string } {
+/** Stage one file, a directory (recursively), or a comment about a page. */
+export function stageAddedPath(ctx: ShellCtx, input: string, stdin: string): { lines: string[]; error: string } {
   let path: string
   try {
     path = normalize(resolve(ctx.cwd, input))
   } catch {
-    return { line: '', error: 'mail: invalid path\n' }
+    return { lines: [], error: 'mail: invalid path\n' }
   }
+  let stat
+  try {
+    stat = ctx.rt.fs.stat(ctx.user, path)
+  } catch (err) {
+    return { lines: [], error: `mail: ${path}: ${errorText(err)}\n` }
+  }
+  if (stat.type === 'dir') return stageDirectory(ctx, path)
+  if (stat.encoding === 'binary') return { lines: [], error: `mail: ${path}: binary file\n` }
   if (isWorktreePath(ctx.user, path)) {
-    const reason = readableFile(ctx, path)
-    if (reason) return { line: '', error: `mail: ${path}: ${reason}\n` }
     const text = localTexts(ctx.rt.fs).get(path)
-    if (text === undefined) return { line: '', error: `mail: ${path}: not in the work tree\n` }
-    if (!text.trim()) return { line: '', error: `mail: ${path}: empty\n` }
-    if (addFile(ctx.rt.outbox.draft, path) === 'full') return { line: '', error: 'mail: the draft is full\n' }
-    return { line: `staged ${path}\n`, error: '' }
+    if (text === undefined) return { lines: [], error: `mail: ${path}: not in the work tree\n` }
+    if (!text.trim()) return { lines: [], error: `mail: ${path}: empty\n` }
+    if (addFile(ctx.rt.outbox.draft, path) === 'full') return { lines: [], error: 'mail: the draft is full\n' }
+    return { lines: [`staged ${path}\n`], error: '' }
   }
-  const reason = readableFile(ctx, path)
-  if (reason) return { line: '', error: `mail: ${path}: ${reason}\n` }
   const body = stdin.trim()
   if (!body) {
     return {
-      line: '',
+      lines: [],
       error: `mail: ${path}: not in the work tree. Pipe a note to mention it. The file is not attached.\n`,
     }
   }
   if (addNote(ctx.rt.outbox.draft, path, clipText(body, MAIL_BODY_MAX)) === 'full') {
-    return { line: '', error: 'mail: the draft is full\n' }
+    return { lines: [], error: 'mail: the draft is full\n' }
   }
   const truncated = [...body].length > MAIL_BODY_MAX ? ' (truncated)' : ''
-  return { line: `staged a comment about ${path}${truncated}\n`, error: '' }
+  return { lines: [`staged a comment about ${path}${truncated}\n`], error: '' }
+}
+
+/** Stage every text file under a directory, like `git add <dir>`. */
+function stageDirectory(ctx: ShellCtx, dir: string): { lines: string[]; error: string } {
+  if (!touchesWorktree(ctx.user, dir)) {
+    return { lines: [], error: `mail: ${dir}: not in the work tree\n` }
+  }
+  const paths = [...localTexts(ctx.rt.fs).entries()]
+    .filter(
+      ([path, text]) =>
+        path !== dir && isInside(dir, path) && isWorktreePath(ctx.user, path) && text.trim() && readable(ctx, path),
+    )
+    .map(([path]) => path)
+    .sort(byPath)
+  if (!paths.length) return { lines: [], error: `mail: ${dir}: no text files to stage\n` }
+  const lines: string[] = []
+  for (const path of paths) {
+    const placed = addFile(ctx.rt.outbox.draft, path)
+    if (placed === 'full') return { lines, error: 'mail: the draft is full\n' }
+    if (placed === 'added') lines.push(`staged ${path}\n`)
+  }
+  if (!lines.length) lines.push(`nothing to add under ${dir}; every text file is already staged.\n`)
+  return { lines, error: '' }
+}
+
+/** Remove one file, a directory, or every matching entry from the staging area. */
+export function unstagePath(ctx: ShellCtx, input: string): { lines: string[]; error: string } {
+  let path: string
+  try {
+    path = normalize(resolve(ctx.cwd, input))
+  } catch {
+    return { lines: [], error: 'mail: invalid path\n' }
+  }
+  let isDir = false
+  try {
+    isDir = ctx.rt.fs.stat(ctx.user, path).type === 'dir'
+  } catch {
+    isDir = false
+  }
+  const matches = (value: string): boolean => {
+    const target = safeNormalize(value)
+    return target === path || (isDir && target !== path && isInside(path, target))
+  }
+  const draft = ctx.rt.outbox.draft
+  const lines: string[] = []
+  const files = draft.files.filter(matches)
+  if (files.length) {
+    draft.files = draft.files.filter((file) => !matches(file))
+    for (const file of files) lines.push(`unstaged ${file}\n`)
+  }
+  const notes = draft.notes.filter((note) => note.about && matches(note.about))
+  if (notes.length) {
+    draft.notes = draft.notes.filter((note) => !note.about || !matches(note.about))
+    for (const note of notes) lines.push(`unstaged comment about ${note.about}\n`)
+  }
+  if (!lines.length) lines.push(`nothing staged at ${path}.\n`)
+  return { lines, error: '' }
+}
+
+/** A directory is in the work tree when it contains, or sits inside, a work-tree root. */
+function touchesWorktree(user: User, dir: string): boolean {
+  const roots = ['/var/guestbook', `/tmp/${user.name}`]
+  return roots.some((root) => isInside(root, dir) || isInside(dir, root))
+}
+
+function safeNormalize(value: string): string {
+  try {
+    return normalize(value)
+  } catch {
+    return value
+  }
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function byPath(a: string, b: string): number {
+  return a.localeCompare(b, 'zh-CN')
 }
 
 export function composeLetter(ctx: ShellCtx): { body: string; path: string } | { error: string } {
   const draft = ctx.rt.outbox.draft
-  if (!draft.files.length && !draft.notes.length) return { error: 'mail: nothing staged. Use mail add.\n' }
+  if (!draft.files.length && !draft.notes.length) return { error: 'mail: nothing staged. Use mail add . or mail add <path>.\n' }
   const local = localTexts(ctx.rt.fs)
   const parts = [`from: ${senderName(ctx.user.name)}`]
   let first = ''
@@ -184,17 +273,6 @@ function readable(ctx: ShellCtx, path: string): boolean {
     return ctx.rt.fs.read(ctx.user, path).encoding === 'utf8'
   } catch {
     return false
-  }
-}
-
-function readableFile(ctx: ShellCtx, path: string): string {
-  try {
-    const stat = ctx.rt.fs.stat(ctx.user, path)
-    if (stat.type === 'dir') return 'Is a directory'
-    if (stat.encoding === 'binary') return 'binary file'
-    return ''
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err)
   }
 }
 

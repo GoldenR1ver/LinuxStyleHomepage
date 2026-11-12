@@ -21,9 +21,15 @@ upload an attachment, copy a page you want to talk about, then mail it.
   The second form mentions the page without attaching its contents.
 
 5. Stage and send
+  mail status
   mail -m "subject"
-  mail add
+  mail add .
   mail push
+
+  The staging area works like git. mail add . stages every text file
+  under the current directory; mail add path stages one file or a
+  directory recursively. mail reset unstages everything, or one path.
+  mail push sends one letter with everything staged.
 
 Useful file commands
   cp source... dest       copy files; -r copies a directory

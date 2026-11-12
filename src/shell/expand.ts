@@ -64,7 +64,7 @@ function expandPart(part: WordPart, ctx: ShellCtx): string {
         out += '$'
         continue
       }
-      out += ctx.env[ref.name] ?? ''
+      out += value(ctx, ref.name)
       i = ref.end - 1
       continue
     }
@@ -73,14 +73,30 @@ function expandPart(part: WordPart, ctx: ShellCtx): string {
   return out
 }
 
+/** $1..$9, $#, $@ and $* read the call's arguments. Anything else is an environment name. */
+function value(ctx: ShellCtx, name: string): string {
+  if (/^\d+$/.test(name)) {
+    const index = Number(name)
+    if (index === 0) return 'sh'
+    return ctx.args[index - 1] ?? ''
+  }
+  if (name === '#') return String(ctx.args.length)
+  if (name === '@' || name === '*') return ctx.args.join(' ')
+  return ctx.env[name] ?? ''
+}
+
 function readVar(source: string, index: number): { name: string; end: number } | null {
   if (source[index] === '{') {
     const end = source.indexOf('}', index + 1)
     if (end < 0) throw new Error('bad substitution')
     const name = source.slice(index + 1, end)
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error('bad substitution')
+    if (!/^(?:[A-Za-z_][A-Za-z0-9_]*|\d+|[#@*])$/.test(name)) throw new Error('bad substitution')
     return { name, end: end + 1 }
   }
+  const special = source[index]
+  if (special && '#@*'.includes(special)) return { name: special, end: index + 1 }
+  const digits = /^\d+/.exec(source.slice(index))
+  if (digits) return { name: digits[0], end: index + digits[0].length }
   const match = /^[A-Za-z_][A-Za-z0-9_]*/.exec(source.slice(index))
   if (!match) return null
   return { name: match[0], end: index + match[0].length }

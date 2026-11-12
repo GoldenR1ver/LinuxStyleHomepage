@@ -3,13 +3,32 @@ import { resolve } from '../kernel/path'
 import { lookup } from './commands'
 import type { ShellCtx } from './context'
 import { expandAlias, expandWord } from './expand'
+import { checkBody, MAX_FUNCTION_DEPTH, MAX_FUNCTIONS, readDefinition, RESERVED } from './function'
 import { writeFile } from './commands/helpers'
-import type { Redirect, Segment, Word } from './parser'
+import type { ListItem, Redirect, Segment, Word } from './parser'
 import { parse } from './parser'
 import type { CommandResult } from './result'
 import { seal } from './seal'
 
+/**
+ * Every segment a single input line may run, counting function bodies.
+ * A body with two calls and a depth of 6 must not fan out without bound.
+ */
+const MAX_SEGMENTS = 200
+
+interface Budget {
+  left: number
+  /** A fan-out would otherwise print the same two errors a hundred times. */
+  depthReported: boolean
+  limitReported: boolean
+}
+
 export async function runLine(line: string, ctx: ShellCtx): Promise<CommandResult> {
+  const definition = readDefinition(line)
+  if (definition) {
+    if ('error' in definition) return { code: 2, stderr: `sh: ${definition.error}\n` }
+    return define(ctx, definition.name, definition.body)
+  }
   ctx.line = line
   let parsed
   try {
@@ -18,7 +37,14 @@ export async function runLine(line: string, ctx: ShellCtx): Promise<CommandResul
     return { code: 2, stderr: `sh: ${message(err)}\n` }
   }
   if (!parsed.items.length) return { code: 0 }
+  return runList(parsed.items, ctx, 0, { left: MAX_SEGMENTS, depthReported: false, limitReported: false })
+}
 
+/**
+ * A function body runs like a line, but ctx.line stays the visible command so a
+ * commit and a journal entry still name what the user typed.
+ */
+async function runList(items: ListItem[], ctx: ShellCtx, depth: number, budget: Budget, feed = ''): Promise<CommandResult> {
   let code = 0
   let stdout = ''
   let stderr = ''
@@ -28,11 +54,14 @@ export async function runLine(line: string, ctx: ShellCtx): Promise<CommandResul
   let pager: string | undefined
   let stage: CommandResult['stage']
   const downloads: NonNullable<CommandResult['downloads']> = []
+  let first = true
 
-  for (const item of parsed.items) {
+  for (const item of items) {
     if (item.op === '&&' && code !== 0) continue
     if (item.op === '||' && code === 0) continue
-    const result = await runPipeline(item.pipeline.segments, ctx)
+    const incoming = first ? feed : ''
+    const result = await runPipeline(item.pipeline.segments, ctx, depth, budget, incoming)
+    first = false
     code = result.code
     stdout = result.stdout ?? ''
     stderr += result.stderr ?? ''
@@ -58,14 +87,21 @@ export async function runLine(line: string, ctx: ShellCtx): Promise<CommandResul
   }
 }
 
-async function runPipeline(segments: Segment[], ctx: ShellCtx): Promise<CommandResult> {
-  let incoming = ''
+async function runPipeline(
+  segments: Segment[],
+  ctx: ShellCtx,
+  depth: number,
+  budget: Budget,
+  feed = '',
+): Promise<CommandResult> {
+  let incoming = feed
   let result: CommandResult = { code: 0, stdout: '' }
   let stderr = ''
   for (let index = 0; index < segments.length; index++) {
     const segment = segments[index]
     if (!segment) continue
-    result = await runSegment(segment, ctx, incoming, index > 0)
+    const piped = index > 0 || (index === 0 && feed !== '')
+    result = await runSegment(segment, ctx, incoming, piped, depth, budget)
     stderr += result.stderr ?? ''
     incoming = result.pager !== undefined ? '' : result.stdout ?? ''
     if (result.logout || result.exitPane) break
@@ -73,7 +109,20 @@ async function runPipeline(segments: Segment[], ctx: ShellCtx): Promise<CommandR
   return { ...result, stderr }
 }
 
-async function runSegment(segment: Segment, ctx: ShellCtx, incoming: string, piped: boolean): Promise<CommandResult> {
+async function runSegment(
+  segment: Segment,
+  ctx: ShellCtx,
+  incoming: string,
+  piped: boolean,
+  depth: number,
+  budget: Budget,
+): Promise<CommandResult> {
+  budget.left -= 1
+  if (budget.left < 0) {
+    if (budget.limitReported) return { code: 1 }
+    budget.limitReported = true
+    return { code: 1, stderr: `sh: this line ran more than ${MAX_SEGMENTS} commands and was stopped.\n` }
+  }
   ctx.revertIds = undefined
   ctx.rt.fs.begin()
   try {
@@ -85,6 +134,21 @@ async function runSegment(segment: Segment, ctx: ShellCtx, incoming: string, pip
     const name = args[0] ?? ''
     const spec = lookup(name)
     if (!spec) {
+      const body = ctx.functions[name]
+      if (body !== undefined) {
+        // Nothing is written before dispatch, so the outer transaction is safe to drop.
+        const input = segment.redirects.find((redirect) => redirect.op === '<')
+        const feed = input ? readInput(ctx, input) : piped ? incoming : ''
+        ctx.rt.fs.abort()
+        const output = await runFunction(ctx, name, body, args.slice(1), depth, budget, feed)
+        const writes = segment.mergeStderr || segment.redirects.some((redirect) => redirect.op !== '<')
+        if (!writes) return output
+        // A redirect on the call writes after the body has already committed.
+        ctx.rt.fs.begin()
+        const redirected = applyRedirects(ctx, segment, output)
+        const note = await seal(ctx)
+        return { ...redirected, stderr: `${redirected.stderr ?? ''}${note}` }
+      }
       ctx.rt.fs.abort()
       return { code: 127, stderr: `sh: ${name}: command not found\n` }
     }
@@ -114,6 +178,58 @@ async function runSegment(segment: Segment, ctx: ShellCtx, incoming: string, pip
     const text = message(err)
     return { code: err instanceof FsError ? 1 : 1, stderr: text.startsWith('sh:') ? ensureNl(text) : `sh: ${ensureNl(text)}` }
   }
+}
+
+/** Run a stored body with $1..$9, $# and $@ bound to the call's arguments. */
+async function runFunction(
+  ctx: ShellCtx,
+  name: string,
+  body: string,
+  argv: string[],
+  depth: number,
+  budget: Budget,
+  feed: string,
+): Promise<CommandResult> {
+  if (depth >= MAX_FUNCTION_DEPTH) {
+    if (budget.depthReported) return { code: 1 }
+    budget.depthReported = true
+    return {
+      code: 1,
+      stderr: `sh: ${name}: too many levels of function calls (${MAX_FUNCTION_DEPTH} allowed)\n`,
+    }
+  }
+  let parsed
+  try {
+    parsed = parse(expandAlias(body, ctx.aliases))
+  } catch (err) {
+    return { code: 1, stderr: `sh: ${name}: ${message(err)}\n` }
+  }
+  if (!parsed.items.length) return { code: 0 }
+  const previous = ctx.args
+  ctx.args = argv
+  try {
+    return await runList(parsed.items, ctx, depth + 1, budget, feed)
+  } finally {
+    ctx.args = previous
+  }
+}
+
+function define(ctx: ShellCtx, name: string, body: string): CommandResult {
+  if (RESERVED.has(name)) return { code: 1, stderr: `sh: ${name}: is a reserved word\n` }
+  if (lookup(name)) {
+    return { code: 1, stderr: `sh: ${name}: is a builtin command; choose another name\n` }
+  }
+  if (ctx.aliases[name]) {
+    return { code: 1, stderr: `sh: ${name}: an alias has that name; run unalias ${name} first\n` }
+  }
+  const known = name in ctx.functions
+  if (!known && Object.keys(ctx.functions).length >= MAX_FUNCTIONS) {
+    return { code: 1, stderr: `sh: too many functions (${MAX_FUNCTIONS} allowed); run unfunction first\n` }
+  }
+  const problem = checkBody(body)
+  if (problem) return { code: 1, stderr: `sh: ${name}: ${problem}\n` }
+  ctx.functions[name] = body
+  return { code: 0 }
 }
 
 function wantsStdin(spec: NonNullable<ReturnType<typeof lookup>>, args: string[]): boolean {

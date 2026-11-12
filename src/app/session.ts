@@ -24,6 +24,8 @@ export function createShell(rt: Runtime, user: User, cwd: string): ShellCtx {
       la: 'ls -la',
       reset: 'clear',
     },
+    functions: {},
+    args: [],
     history: [],
     rt,
     host: {

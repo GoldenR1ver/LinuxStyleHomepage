@@ -232,6 +232,163 @@ describe('shell', () => {
     expect(rt.outbox.draft.files).toHaveLength(0)
   })
 
+  it('stages with git-like add, status and reset', async () => {
+    const { ctx, rt } = boot({ webhook: true })
+    await runLine('mkdir -p /var/guestbook/sub', ctx)
+    await runLine('echo one > /var/guestbook/one.txt', ctx)
+    await runLine('echo two > /var/guestbook/sub/two.txt', ctx)
+    await runLine('echo scratch > /tmp/ada/scratch.txt', ctx)
+    await runLine('mail reset', ctx)
+    expect((await runLine('cd /var/guestbook', ctx)).code).toBe(0)
+
+    const added = await runLine('mail add .', ctx)
+    expect(added.code).toBe(0)
+    expect(added.stdout).toContain('/var/guestbook/one.txt')
+    expect(added.stdout).toContain('/var/guestbook/sub/two.txt')
+    expect(rt.outbox.draft.files).not.toContain('/tmp/ada/scratch.txt')
+
+    const listed = await runLine('mail status', ctx)
+    expect(listed.code).toBe(0)
+    expect(listed.stdout).toContain('staged:')
+    expect(listed.stdout).toContain('/var/guestbook/one.txt')
+    expect(listed.stdout).toContain('not staged:')
+    expect(listed.stdout).toContain('/tmp/ada/scratch.txt')
+
+    await runLine('mail -m "git habits"', ctx)
+    const one = await runLine('mail reset one.txt', ctx)
+    expect(one.code).toBe(0)
+    expect(one.stdout).toContain('unstaged /var/guestbook/one.txt')
+    expect(rt.outbox.draft.files).toEqual(['/var/guestbook/sub/two.txt'])
+    expect(rt.outbox.draft.subject).toBe('git habits')
+
+    const all = await runLine('mail add -A', ctx)
+    expect(all.code).toBe(0)
+    expect(rt.outbox.draft.files).toContain('/tmp/ada/scratch.txt')
+  })
+
+  it('defines a function and binds positional arguments', async () => {
+    const { ctx, rt } = boot()
+    expect((await runLine('greet() { echo "hi $1 from $0"; }', ctx)).code).toBe(0)
+    expect(rt.outbox.draft.subject).toBe('')
+    const called = await runLine('greet ada', ctx)
+    expect(called.code).toBe(0)
+    expect(called.stdout).toBe('hi ada from sh\n')
+
+    expect((await runLine('count() { echo $#; }', ctx)).code).toBe(0)
+    expect((await runLine('count a b c', ctx)).stdout).toBe('3\n')
+    expect((await runLine('all() { echo $@; }', ctx)).code).toBe(0)
+    expect((await runLine('all a b', ctx)).stdout).toBe('a b\n')
+
+    const listed = await runLine('functions greet', ctx)
+    expect(listed.stdout).toBe('greet() { echo "hi $1 from $0"; }\n')
+    expect((await runLine('which greet', ctx)).stdout).toBe('greet (function)\n')
+    expect((await runLine('unfunction greet', ctx)).code).toBe(0)
+    expect((await runLine('greet ada', ctx)).code).toBe(127)
+  })
+
+  it('lets a function run pipes, redirects and other functions', async () => {
+    const { ctx, fs } = boot()
+    expect((await runLine('p() { echo hi | wc -c; }', ctx)).code).toBe(0)
+    expect((await runLine('p', ctx)).stdout).toBe('      3\n')
+
+    expect((await runLine("save() { echo note > /tmp/ada/f.txt; }", ctx)).code).toBe(0)
+    const saved = await runLine('save', ctx)
+    expect(saved.code).toBe(0)
+    expect(fs.read(ctx.user, '/tmp/ada/f.txt').content).toBe('note\n')
+
+    expect((await runLine('outer() { inner x; }', ctx)).code).toBe(0)
+    expect((await runLine('inner() { echo "inner $1"; }', ctx)).code).toBe(0)
+    expect((await runLine('outer', ctx)).stdout).toBe('inner x\n')
+
+    expect((await runLine('caps() { echo shout; }', ctx)).code).toBe(0)
+    expect((await runLine('caps | grep shout', ctx)).stdout).toBe('shout\n')
+
+    const redirected = await runLine('caps > /tmp/ada/said.txt', ctx)
+    expect(redirected.code).toBe(0)
+    expect(redirected.stdout ?? '').toBe('')
+    expect(fs.read(ctx.user, '/tmp/ada/said.txt').content).toBe('shout\n')
+  })
+
+  it('stops recursion at the documented depth', async () => {
+    const { ctx } = boot()
+    expect((await runLine('deep() { deep; }', ctx)).code).toBe(0)
+    const result = await runLine('deep', ctx)
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('too many levels of function calls')
+    expect(result.stderr).toContain('6 allowed')
+
+    expect((await runLine('alt() { other; }', ctx)).code).toBe(0)
+    expect((await runLine('other() { alt; }', ctx)).code).toBe(0)
+    expect((await runLine('alt', ctx)).stderr).toContain('too many levels')
+  })
+
+  it('stops a fan-out before it can flood the page', async () => {
+    const { ctx } = boot()
+    expect((await runLine('fan() { fan; fan; fan; }', ctx)).code).toBe(0)
+    const result = await runLine('fan', ctx)
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('too many levels of function calls')
+    expect(result.stderr).toContain('more than 200 commands')
+    expect((result.stderr ?? '').trimEnd().split('\n')).toHaveLength(2)
+  })
+
+  it('accepts the function keyword and keeps one name per kind', async () => {
+    const { ctx } = boot()
+    expect((await runLine('function hello { echo hi; }', ctx)).code).toBe(0)
+    expect((await runLine('hello', ctx)).stdout).toBe('hi\n')
+    expect((await runLine('function nope', ctx)).stderr).toContain('one line')
+
+    expect((await runLine('mine() { echo x; }', ctx)).code).toBe(0)
+    const clash = await runLine("alias mine='ls'", ctx)
+    expect(clash.code).toBe(1)
+    expect(clash.stderr).toContain('function has that name')
+    expect((await runLine('functions', ctx)).stdout).toContain('mine() { echo x; }')
+  })
+
+  it('refuses a function that would shadow a builtin, and bad bodies', async () => {
+    const { ctx } = boot()
+    const builtin = await runLine('ls() { echo nope; }', ctx)
+    expect(builtin.code).toBe(1)
+    expect(builtin.stderr).toContain('builtin')
+    expect((await runLine('if() { echo x; }', ctx)).stderr).toContain('reserved')
+
+    expect((await runLine('ll() { echo x; }', ctx)).stderr).toContain('alias has that name')
+    expect((await runLine('f() { }', ctx)).stderr).toContain('empty function body')
+    expect((await runLine('f() { echo x', ctx)).stderr).toContain('missing }')
+    expect((await runLine('f()', ctx)).stderr).toContain('one line')
+    expect((await runLine('f() { g() { echo x; }; }', ctx)).stderr).toContain('cannot define another function')
+    expect((await runLine('f() { echo x; } extra', ctx)).stderr).toContain('may follow')
+  })
+
+  it('caps the number of functions and their length', async () => {
+    const { ctx } = boot()
+    for (let i = 0; i < 32; i++) {
+      expect((await runLine(`f${i}() { echo ${i}; }`, ctx)).code).toBe(0)
+    }
+    const over = await runLine('extra() { echo x; }', ctx)
+    expect(over.code).toBe(1)
+    expect(over.stderr).toContain('too many functions')
+
+    const long = await runLine(`g() { echo ${'x'.repeat(600)}; }`, ctx)
+    expect(long.stderr).toContain('longer than 512')
+
+    const many = await runLine(`h() { ${Array.from({ length: 21 }, () => 'true;').join(' ')} }`, ctx)
+    expect(many.stderr).toContain('the limit is 20')
+  })
+
+  it('gives a function the stdin of the pipeline that called it', async () => {
+    const { ctx } = boot()
+    expect((await runLine('upper() { cat; }', ctx)).code).toBe(0)
+    const piped = await runLine('echo hello | upper', ctx)
+    expect(piped.code).toBe(0)
+    expect(piped.stdout).toBe('hello\n')
+
+    expect((await runLine("echo 'from file' > /tmp/ada/in.txt", ctx)).code).toBe(0)
+    const redirected = await runLine('upper < /tmp/ada/in.txt', ctx)
+    expect(redirected.code).toBe(0)
+    expect(redirected.stdout).toBe('from file\n')
+  })
+
   it('stops after too many letters and keeps a failed letter staged', async () => {
     const { ctx, mail, rt } = boot({ stdin: 'hello\n', webhook: true })
     await runLine('cat > /var/guestbook/ada.txt', ctx)

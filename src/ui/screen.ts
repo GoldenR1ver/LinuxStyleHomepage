@@ -71,6 +71,8 @@ export function startApp(rt: Runtime, warning = '') {
         cwd: from.cwd,
         env: { ...from.env },
         aliases: { ...from.aliases },
+        functions: { ...from.functions },
+        args: [],
         history: [],
         rt,
         host: from.host,
