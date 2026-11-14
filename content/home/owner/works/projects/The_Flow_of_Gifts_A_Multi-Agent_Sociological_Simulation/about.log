@@ -4,7 +4,7 @@ The Flow of Gifts
 https://github.com/GoldenR1ver/AI-town
 
 [Application scenarios]:
-Social science and generative-agent research: testing an ethnographic claim about gift exchange by running it. Also a teaching demo: a 16-person, 10-act story replays in the browser without an API key.
+Social science and generative-agent research: testing an ethnographic claim about gift exchange by running it instead of arguing about it. Also a teaching demo: a 16-person, 10-act story replays in the browser without an API key, and the same code scales to 100 agents and 365 days once a model is attached.
 
 [effectiveness]:
 100 agents, 365 days, DeepSeek, seed=42: [1;33mreciprocity 0.90, default 0.022, average repay delay ~17 slots[0m. Gifts follow prestige (0.51) rather than money (0.07); prestige gini is 0.16 and the top 10 take 27% of gifts. All 344 dialogues passed the speech-state check. Turning off any one component degrades the phenomenon it carries.
@@ -12,11 +12,15 @@ Social science and generative-agent research: testing an ethnographic claim abou
 [advantage]:
 The LLM only talks. It proposes words and intentions; the RuleEngine alone writes money, gifts, debts and relationships, so every result can be settled, logged and replayed.
 
-Each of the nine parts stands on published work, but the combination is mine: nine switchable mechanisms in one world, where a claim is tested by turning it off instead of tuning one good number. Three pairings work better than I expected.
+Each of the nine parts stands on published work, but the combination is mine: nine switchable mechanisms in one world, where a claim is tested by turning it off instead of tuning one good number. The lineage is kept explicit and so is the delta. BDI and OCC appraisal become a state that can lift a near-due debt to priority 95-99; the memory stream of Generative Agents becomes a hierarchy whose promotions are subjective relationship memory; Big Five becomes three probabilities that decide refusal and gossip but never the outcome; Yan Yunxiang's split between horizontal reciprocity and vertical tribute becomes a repayment window with an exemption. A framework supplies a representation; it does not supply a settlement rule, a falsifiable macro pattern, or a way to tell which module is doing the work.
+
+Three pairings work better than I expected.
 
 - Cognitive tree × relationship graph. The edge is the objective relation; the tree is the relation as remembered. That split gives long-horizon continuity, and without it gifts drift one way up the status ladder.
 - BDIE × Big Five. State explains the week (broke, stressed, a debt due), personality explains the person (introverted, picky, spiteful). Remove either and the village becomes an average agent.
 - Event system × world engine. Events decide when something happens and who meets whom; the clock, state and settlement stay in the engine. Dialogue never moves either.
+
+The evidence is built to be falsified rather than decorated. Hypotheses are written as bands before the run (reciprocity 0.7-0.95, default 0.02-0.20), and the run is judged against them; fidelity is read at three levels, macro marginals, individual trajectories and process evidence such as repay delay, intention priority and discourse alignment, instead of a few quotable transcripts. A0-A3 ablation and E1-E4 contrast switch one mechanism at a time; every write carries before, after, reason and formula in an append-only log; the front end replays logs and snapshots and never advances the simulation. A mock preset reproduces the whole story offline, so anyone can re-run a claim.
 
 [method]:
 Nine components in five layers. Each stands on a known framework and adds the one thing that framework cannot give.
@@ -25,17 +29,17 @@ Trigger
   8 Event system: public affairs, visits, gossip, repayment attempts. Discrete-event simulation; added, initiation is driven by personality and emotion, so timing bursts instead of running flat.
 
 Expression
-  6 Dialogue: two-person, host and group modes. Generative agents (Park et al.); added, the prompt uses the same variables as settlement and may not claim world changes.
+  6 Dialogue: two-person, host and group modes. Generative agents (Park et al., 2023); added, the prompt uses the same variables as settlement and may not claim world changes.
 
 Memory
   5 PET personal event table: each agent's own recent events with confidence. From episodic memory; added, propagation follows visibility, so agents remember different things.
   4 Cognitive tree: social, circle, relation, dialogue; summaries promoted by accumulated influence. From Park et al.'s memory stream, made hierarchical; added, promotion becomes subjective relationship memory and returns to later prompts.
 
 Cognition
-  3 BDIE: belief, desire, intention plus mood, arousal, stress and energy. From BDI (Rao and Georgeff) and OCC appraisal (Ortony et al.); added, a near-due gift debt is lifted to priority 95-99 and becomes repay urgency.
+  3 BDIE: belief, desire, intention plus mood, arousal, stress and energy. From BDI (Bratman, 1987; Rao and Georgeff, 1995), OCC appraisal (Ortony, Clore and Collins, 1988) and core affect (Russell, 1980); added, a near-due gift debt is lifted to priority 95-99 and becomes repay urgency.
   9 Personality: Big Five mapped to introversion, pickiness and spitefulness. From Costa and McCrae; added, the three only set refusal and gossip probabilities, never the outcome.
 
 Settlement
-  1 RuleEngine + gift ledger: the only write gate, with pending, replied, defaulted and closed, and windows W4-W10. From institutional simulation and Yan Yunxiang's gift theory; added, the window and vertical exemption make delay and asymmetry emerge rather than be scripted.
-  2 Relationship graph: directed edges carrying trust, intimacy, dislike and debt, plus a vertical axis and social basis. From signed network theory; added, the axis, which is the only carrier of vertical asymmetry.
+  1 RuleEngine + gift ledger: the only write gate, with pending, replied, defaulted and closed, and windows W4-W10. From institutional simulation and the gift literature (Mauss, 1925; Yan Yunxiang, 1996); added, the window and vertical exemption make delay and asymmetry emerge rather than be scripted.
+  2 Relationship graph: directed edges carrying trust, intimacy, dislike and debt, plus a vertical axis and social basis. From signed network theory (balance theory, Heider; Cartwright and Harary); added, the axis, which is the only carrier of vertical asymmetry.
   7 Economy: living cost, wages, savings and gift expectation checks. From budget-constrained agents; added, an affordability factor that turns "has money" into "can repay".

@@ -1,0 +1,19 @@
+Workflow (specgate)
+
+[Link]:
+https://github.com/GoldenR1ver/Specgate-An-agile-development-architecture-for-human-AI-collaboration
+
+[Application scenarios]:
+For solo developers and small teams who hand implementation to AI and want the output held to something a machine can check. It is a template rather than a tool: copy the repository, replace the course-drop sample with your own domain, and the nine steps and nine gates are already wired. It is also a worked example of binding each invariant to exactly one check, instead of writing acceptance criteria in prose.
+
+[effectiveness]:
+[1;33mNine gates over the six placements -- save, pre-commit, pr, merge, release, runtime -- each with a negative test, a cost budget and a 90-day review date; fifteen constraints in seven kinds, each bound to one check; 32 tests passing with all 108 skips confined to the empty prototype layer[0m, because a skip must name the step it waits for, so a green line cannot hide an untested layer. The decision table enumerates all 48 combinations of five conditions with no otherwise row, the spec holds ten shall-rules, and 30 test files cover seven oracle tiers. The six gate scripts report 0 problems on the sample.
+
+[advantage]:
+What the structure forbids matters more than what it lists. A criterion cannot drift toward the implementation: tests never read src, expected values come from the spec and the decision table, and the differential model in tests/_support/refmodel.py shares no line with the prototype. A gate cannot be decoration: each ships a negative test that breaks a sample on purpose, priced in p95 cost, with a review date that expires. Handoff runs one way only, so a new condition goes back to intent as a question instead of being patched downstream. Three acts stay human by rule: writing intent, approving the decision table, granting a waiver. The gates also sit where obedience is cheapest -- document-only checks at save and pre-commit, binding ones at merge, the slow matrix and migration runs at release.
+
+[method]:
+Nine steps with one exit condition each: intent, spec, decision table, const, prototype, tests, gates, UML, next round. A step that misses its exit rolls back instead of flowing on. Tests are grouped by oracle rather than by feature -- acc, prop, diff, meta, bench, e2e, gates -- so one test carries one criterion, and MANIFEST.yaml maps every file to its source id for the reference gate to verify. Each constraint must name one of five check types: property for a law, differential for a second implementation, meta for a replay, bench for an SLO, lint for structure. When none fits, the constraint is deleted rather than kept as prose.
+
+[Python]:
+Python 3.11+, pytest and Hypothesis with a fixed seed and deadline=None, PyYAML, ruff optional. Time is injected through tests/_support/clock.py instead of sleeping, so a drop window and a five-second promotion delay are asserted in milliseconds. The six gate scripts stay importable and return an exit code, so any hook can call them. Output is UTF-8: on a cp1252 console the gate scripts raise UnicodeEncodeError until PYTHONIOENCODING=utf-8 is set -- the same locale trap that forces pytest.ini to stay ASCII.
