@@ -32,10 +32,17 @@ export function stageSavedGuestbook(ctx: ShellCtx, path: string): string {
   if (text === undefined) return ''
   if (!text.trim()) return 'note saved in this browser.\n'
   if (addFile(ctx.rt.outbox.draft, normal) === 'full') return 'note saved in this browser. The mail draft is full.\n'
-  const next = ctx.rt.outbox.draft.subject
-    ? 'mail push notifies the owner.'
-    : 'mail -m "subject", then mail push, notifies the owner.'
-  return `staged ${normal}. ${next}\n`
+  return `staged ${normal}. ${nextStep(ctx)}\n`
+}
+
+/** The shortest path from this draft to a delivered letter. */
+function nextStep(ctx: ShellCtx): string {
+  const draft = ctx.rt.outbox.draft
+  const steps: string[] = []
+  if (!draft.from) steps.push('mail --user you@example.com')
+  if (!draft.subject) steps.push('mail -m "subject"')
+  if (!steps.length) return 'mail push notifies the owner.'
+  return `${steps.join(', then ')}, then mail push, notifies the owner.`
 }
 
 /** A rename or delete can leave a staged work-tree path behind. Drop it before the next send. */
@@ -210,7 +217,7 @@ export function composeLetter(ctx: ShellCtx): { body: string; path: string } | {
   const draft = ctx.rt.outbox.draft
   if (!draft.files.length && !draft.notes.length) return { error: 'mail: nothing staged. Use mail add . or mail add <path>.\n' }
   const local = localTexts(ctx.rt.fs)
-  const parts = [`from: ${senderName(ctx.user.name)}`]
+  const parts = [`from: ${senderName(ctx.user.name)}`, `reply-to: ${draft.from}`]
   let first = ''
   for (const file of draft.files) {
     let path: string

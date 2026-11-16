@@ -45,11 +45,14 @@ describe('shell', () => {
     expect(saved.stderr).toContain('mail push')
     expect(saved.stderr).not.toContain('hello')
     expect(await runLine('mail -m "hello there"', ctx)).toMatchObject({ code: 0 })
+    expect(await runLine('mail --user ada@example.com', ctx)).toMatchObject({ code: 0 })
     const sent = await runLine('mail push', ctx)
     expect(sent.code).toBe(0)
     expect(mail.notes).toHaveLength(1)
     expect(mail.notes[0]?.subject).toBe('hello there')
     expect(mail.notes[0]?.kind).toBe('letter')
+    expect(mail.notes[0]?.from).toBe('ada@example.com')
+    expect(mail.notes[0]?.body).toContain('reply-to: ada@example.com')
     expect(mail.notes[0]?.body).toContain('hello\n')
     expect(mail.notes[0]?.body).toContain('/var/guestbook/ada.txt')
     expect(remote.commits).toHaveLength(0)
@@ -57,6 +60,43 @@ describe('shell', () => {
     expect(sent.stdout).not.toContain('http')
     expect(rt.outbox.draft.files).toHaveLength(0)
     expect(rt.outbox.draft.subject).toBe('')
+  })
+
+  it('requires a reply address before a letter can be sent', async () => {
+    const { ctx, mail, rt } = boot({ stdin: 'hello\n', webhook: true })
+    await runLine('cat > /var/guestbook/ada.txt', ctx)
+    await runLine('mail -m "question"', ctx)
+
+    const blocked = await runLine('mail push', ctx)
+    expect(blocked.code).toBe(1)
+    expect(blocked.stderr).toContain('no reply address')
+    expect(blocked.stderr).toContain('mail --user')
+    expect(mail.notes).toHaveLength(0)
+    expect(rt.outbox.draft.files).toContain('/var/guestbook/ada.txt')
+
+    expect((await runLine('mail --user', ctx)).stdout).toBe('user: (unset)\n')
+    for (const bad of ['ada', 'ada@', '@example.com', 'ada@example', 'ada@example.com Bcc: x']) {
+      const refused = await runLine(`mail --user "${bad}"`, ctx)
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain('not an email address')
+      expect(rt.outbox.draft.from).toBe('')
+    }
+
+    const set = await runLine('mail --user ada@example.com', ctx)
+    expect(set.code).toBe(0)
+    expect(set.stdout).toContain('ada@example.com')
+    expect((await runLine('mail --user', ctx)).stdout).toBe('user: ada@example.com\n')
+    expect((await runLine('mail status', ctx)).stdout).toContain('user: ada@example.com')
+
+    expect((await runLine('mail push', ctx)).code).toBe(0)
+    expect(mail.notes[0]?.from).toBe('ada@example.com')
+    expect(mail.notes[0]?.body).toContain('reply-to: ada@example.com')
+    expect(rt.outbox.draft.from).toBe('ada@example.com')
+
+    expect((await runLine('mail reset', ctx)).stdout).toContain('draft cleared')
+    expect(rt.outbox.draft.from).toBe('ada@example.com')
+    expect((await runLine('mail --user ""', ctx)).stdout).toContain('user cleared')
+    expect(rt.outbox.draft.from).toBe('')
   })
 
   it('uploads text and binary files with scp, then copies and moves them', async () => {
@@ -109,6 +149,7 @@ describe('shell', () => {
     expect(rt.outbox.draft.files).toContain('/var/guestbook/my-note.txt')
     expect(rt.outbox.draft.files).not.toContain('/var/guestbook/note.txt')
     await runLine('mail -m "renamed"', ctx)
+    await runLine('mail --user ada@example.com', ctx)
     expect((await runLine('mail push', ctx)).code).toBe(0)
     expect(mail.notes[0]?.body).toContain('/var/guestbook/my-note.txt')
     expect(mail.notes[0]?.body).not.toContain('/var/guestbook/note.txt')
@@ -186,6 +227,7 @@ describe('shell', () => {
     expect(rt.outbox.draft.subject).toBe('')
     rt.outbox.draft.subject = 'x'
     rt.outbox.draft.files.push('/root/README.md')
+    await runLine('mail --user ada@example.com', ctx)
     const leaked = await runLine('mail push', ctx)
     expect(leaked.code).toBe(1)
     expect(leaked.stderr).not.toContain('secret')
@@ -201,6 +243,7 @@ describe('shell', () => {
     const added = await runLine('echo question | mail add /home/owner/about.md', ctx)
     expect(added.code).toBe(0)
     expect(added.stdout).toContain('/home/owner/about.md')
+    await runLine('mail --user ada@example.com', ctx)
     const sent = await runLine('mail push', ctx)
     expect(sent.code).toBe(0)
     const body = mail.notes[0]?.body ?? ''
@@ -220,16 +263,21 @@ describe('shell', () => {
     const listed = await runLine('mail', ctx)
     expect(listed.stdout).toContain('/tmp/ada/n.txt')
     expect(listed.stdout).toContain('relay: off')
+    expect(listed.stdout).toContain('user: (unset)')
     expect(listed.stdout).not.toContain('http')
     expect((await runLine('mail -m "hi"', ctx)).code).toBe(0)
+    await runLine('mail --user ada@example.com', ctx)
     const sent = await runLine('mail push', ctx)
     expect(sent.code).toBe(1)
+    expect(sent.stderr).toContain('relay is not configured')
     expect(mail.notes).toHaveLength(0)
     expect(rt.outbox.draft.subject).toBe('hi')
     expect(rt.outbox.draft.files).toContain('/tmp/ada/n.txt')
+    expect(rt.outbox.draft.from).toBe('ada@example.com')
     expect((await runLine('mail reset', ctx)).stdout).toContain('draft cleared')
     expect(rt.outbox.draft.subject).toBe('')
     expect(rt.outbox.draft.files).toHaveLength(0)
+    expect(rt.outbox.draft.from).toBe('ada@example.com')
   })
 
   it('stages with git-like add, status and reset', async () => {
@@ -393,6 +441,7 @@ describe('shell', () => {
     const { ctx, mail, rt } = boot({ stdin: 'hello\n', webhook: true })
     await runLine('cat > /var/guestbook/ada.txt', ctx)
     await runLine('mail -m "hi"', ctx)
+    await runLine('mail --user ada@example.com', ctx)
     rt.outbox.sent = 8
     const capped = await runLine('mail push', ctx)
     expect(capped.code).toBe(1)
@@ -403,12 +452,13 @@ describe('shell', () => {
     rt.mail = {
       configured: true,
       async send() {
-        return 'failed'
+        return { status: 'failed', detail: '403: form needs confirmation' }
       },
     }
     const failed = await runLine('mail push', ctx)
     expect(failed.code).toBe(1)
     expect(failed.stderr).toContain('stays staged')
+    expect(failed.stderr).toContain('403')
     expect(rt.outbox.draft.files).toContain('/var/guestbook/ada.txt')
   })
 

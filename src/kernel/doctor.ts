@@ -1,4 +1,4 @@
-import { mailRelay, publicHome, type SiteConfig } from '../config/site'
+import { mailRelayProblem, publicHome, type SiteConfig } from '../config/site'
 import type { VirtualFS } from './vfs'
 
 const root = { name: 'root', role: 'root' as const }
@@ -25,6 +25,7 @@ export function doctor(fs: VirtualFS, site: SiteConfig): string[] {
   if (!site.github.owner || !site.github.repo) {
     notes.push('github.owner / github.repo are unset, so server files cannot be changed')
   }
-  if (!mailRelay(site.webhookUrl)) notes.push('webhookUrl is unset or not an https relay, so mail push cannot notify you')
+  const relay = mailRelayProblem(site.webhookUrl)
+  if (relay) notes.push(`${relay}, so mail push cannot notify you`)
   return notes
 }

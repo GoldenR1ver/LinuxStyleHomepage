@@ -1,4 +1,4 @@
-import type { MailNote, Mailer } from './mail'
+import type { MailNote, MailResult, Mailer } from './mail'
 import type { RemoteChange } from '../kernel/types'
 import type { RemoteRepo } from './repo'
 
@@ -20,8 +20,8 @@ export class MemoryMail implements Mailer {
 
   constructor(public configured = false) {}
 
-  async send(note: MailNote): Promise<'sent' | 'skipped' | 'failed'> {
+  async send(note: MailNote): Promise<MailResult> {
     this.notes.push(note)
-    return this.configured ? 'sent' : 'skipped'
+    return { status: this.configured ? 'sent' : 'skipped' }
   }
 }

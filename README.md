@@ -180,6 +180,7 @@ vim your-name.txt
 scp                        # choose local files to upload here
 cp /home/owner/about.txt quote.txt
 mv quote.txt about-quote.txt
+mail --user you@example.com
 mail -m "subject"
 mail push
 ```
@@ -192,12 +193,19 @@ mail push
 echo "question" | mail add /home/owner/about.md
 ```
 
+`mail --user you@example.com` records the guest's own address, and `mail push` refuses to send without one, so every letter can be answered. The address goes to the relay as `email`, which Formspree uses as Reply-To, and it is also written into the letter as `reply-to:`. `mail reset` and a finished send keep it; `mail --user ""` clears it. A letter body now starts:
+
+```text
+from: name
+reply-to: you@example.com
+```
+
 The file stays in that browser. `mail push` POSTs one letter to `webhookUrl`. The command cannot pass a URL, a recipient, or the GitHub token. When the relay is set, the JSON includes Formspree fields:
 
 ```json
 {
-  "email": "name@homepage.local",
-  "message": "to: you@example.com\nfrom: name\n\n--- /var/guestbook/your-name.txt\nnote body",
+  "email": "you@example.com",
+  "message": "to: you@example.com\nfrom: name\nreply-to: you@example.com\n\n--- /var/guestbook/your-name.txt\nnote body",
   "_subject": "[home] subject",
   "_gotcha": "",
   "type": "letter",
@@ -206,7 +214,9 @@ The file stays in that browser. `mail push` POSTs one letter to `webhookUrl`. Th
 }
 ```
 
-The endpoint must allow browser CORS. The form's own recipient is who gets the mail. Other visitors cannot read the note, and it is not committed. If the relay is missing or the request fails, the shell says so and the draft remains.
+The endpoint must allow browser CORS. The form's own recipient is who gets the mail. Other visitors cannot read the note, and it is not committed. If the relay is missing or the request fails, the shell says so and the draft remains. The failure line carries the relay status, for example `mail: delivery failed (403: form needs confirmation)`.
+
+A Formspree form must be confirmed in its dashboard before it accepts letters, and the free plan allows 50 a month. `webhookUrl` is the only setting: `mail push` cannot change the URL, the recipient, or read the GitHub token.
 
 ## Log and rollback
 
@@ -283,6 +293,6 @@ vite/content.ts          packs content/ into the site, and nothing else
 ## Limits
 
 - The root password is not authentication. Remote writes trust the GitHub token in this browser. `mail push` does not use that token.
-- Guest drafts, guestbook notes, and the log live in the browser. Another computer does not have them. The owner reads a pushed letter in the relay mailbox.
+- Guest drafts, the reply address, guestbook notes, and the log live in the browser. Another computer does not have them. The owner reads a pushed letter in the relay mailbox and can answer it at the guest's address.
 - There is no command substitution, no background jobs, and no full VT100 emulator.
 - Binary files can be downloaded. Root cannot edit or publish them from the shell. `scp` keeps uploaded binaries in this browser. Replace the file under `content/` and rebuild to publish one.

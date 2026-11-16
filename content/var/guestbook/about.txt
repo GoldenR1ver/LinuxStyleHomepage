@@ -20,7 +20,14 @@ upload an attachment, copy a page you want to talk about, then mail it.
   echo "question about this section" | mail add /home/owner/about.txt
   The second form mentions the page without attaching its contents.
 
-5. Stage and send
+5. Set your reply address
+  mail --user you@example.com
+  The owner answers at this address. There are no anonymous letters:
+  mail push refuses to send until one is set. It stays in this browser
+  and is sent to the mail relay as the Reply-To address. mail reset and
+  a finished send keep it; mail --user "" clears it.
+
+6. Stage and send
   mail status
   mail -m "subject"
   mail add .

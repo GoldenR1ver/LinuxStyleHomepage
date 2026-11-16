@@ -80,9 +80,10 @@ Guestbook
   cp /home/owner/a.txt b.txt        copy a page into your note
   mv old.txt new.txt                move or rename
   mail status                      show the staging area
+  mail --user you@example.com       set the address the owner can reply to
   mail -m "subject"
   mail add .                       stage text files in this directory
-  mail push
+  mail push                        needs an address, so nothing is anonymous
   mail reset                       unstage everything
   Text files are staged by mail add . Binary uploads stay in your browser; wget downloads them.
   echo "question" | mail add /home/owner/about.txt   comment on a page without attaching it

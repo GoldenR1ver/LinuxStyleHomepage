@@ -1,18 +1,24 @@
-import { clearDraft, MAIL_SEND_MAX, MAIL_SUBJECT_MAX } from '../../remote/outbox'
+import { clearDraft, MAIL_SEND_MAX, MAIL_SUBJECT_MAX, mailAddress } from '../../remote/outbox'
+import type { MailResult } from '../../remote/mail'
 import type { ShellCtx } from '../context'
 import { composeLetter, stageAddedPath, stageWorktree, unstagePath, worktreeFiles } from '../mailbox'
 import type { CommandSpec } from './types'
 
 const USAGE =
-  'mail: usage: mail [status] | mail -m "subject" | mail add [-A|--all] [path...] | mail reset [path...] | mail push\n'
+  'mail: usage: mail [status] | mail --user you@example.com | mail -m "subject" | mail add [-A|--all] [path...] | mail reset [path...] | mail push\n'
 
 /**
  * Flags and URL-shaped arguments are refused so a letter cannot retarget the relay.
  * The subject value itself may mention a URL. It is still one header line.
+ * --user names the guest's own reply address, not the recipient.
  */
 function fixedRoute(args: string[]): string | null {
   const subjectIndex = (() => {
     const at = args.indexOf('-m')
+    return at >= 0 ? at + 1 : -1
+  })()
+  const addressIndex = (() => {
+    const at = args.findIndex((arg) => arg === '--user' || arg === '-u')
     return at >= 0 ? at + 1 : -1
   })()
   for (let i = 0; i < args.length; i++) {
@@ -20,7 +26,8 @@ function fixedRoute(args: string[]): string | null {
     if (/^(?:--?(?:to|url|webhook|recipient|cc|bcc|token|auth|password))(?:=|$)/i.test(arg)) {
       return 'mail: the relay and recipient are fixed\n'
     }
-    if (i !== subjectIndex && /^(?:https?|mailto|ssh|ftp|github):/i.test(arg)) {
+    const usable = i === subjectIndex || i === addressIndex || /^--user=/i.test(arg)
+    if (!usable && /^(?:https?|mailto|ssh|ftp|github):/i.test(arg)) {
       return 'mail: the relay and recipient are fixed\n'
     }
   }
@@ -31,19 +38,24 @@ export const mailCommand: CommandSpec = {
   name: 'mail',
   group: 'site',
   summary: 'send a note to the owner',
-  usage: 'mail [status] | mail -m "subject" | mail add [-A|--all] [path...] | mail reset [path...] | mail push',
+  usage:
+    'mail [status] | mail --user you@example.com | mail -m "subject" | mail add [-A|--all] [path...] | mail reset [path...] | mail push',
   manual:
     'Stages a letter and sends it to the owner. The relay URL and the recipient come from site.ts. This command cannot change either of them, and it does not read the GitHub token.\n\n' +
     'The staging area works like git. The work tree is /var/guestbook and /tmp/<you>.\n' +
-    '  mail status          show the relay, the subject, and staged and unstaged text files\n' +
+    '  mail status          show the relay, the reply address, the subject, and staged and unstaged text files\n' +
+    '  mail --user <addr>   set your reply address. The owner can answer the letter at this address.\n' +
+    '  mail --user          print the address that is set\n' +
+    '  mail --user ""       clear the address\n' +
     '  mail add .           stage every text file under the current directory\n' +
     '  mail add <path...>   stage a file, or a directory recursively\n' +
     '  mail add             stage the whole work tree\n' +
     '  mail add -A          same as mail add\n' +
-    '  mail reset           clear the staging area and the subject\n' +
+    '  mail reset           clear the staging area and the subject. The address stays.\n' +
     '  mail reset <path...> unstage a file or a directory\n' +
     '  mail -m "subject"    set the subject\n' +
     '  mail push            send one letter with everything staged\n\n' +
+    'mail push needs an address, so there are no anonymous letters. The address is sent to the relay as Reply-To and stored in this browser only. mail reset and a finished send keep it, so the next letter does not ask again.\n\n' +
     'A path outside the work tree stages a comment when a note is piped, and the page body is not attached: echo "question" | mail add /home/owner/about.txt. Saving a new guestbook file stages it. scp copies a file from your computer into the current directory first. The owner reads the letter in the mailbox behind webhookUrl. Other visitors cannot see it, and it is not committed.',
   async run(ctx, args, stdin) {
     const blocked = fixedRoute(args)
@@ -52,6 +64,10 @@ export const mailCommand: CommandSpec = {
     if (args[0] === 'status') {
       if (args.length !== 1) return { code: 1, stderr: 'mail: usage: mail status\n' }
       return status(ctx)
+    }
+    if (args[0] === '--user' || args[0] === '-u') return setAddress(ctx, args.slice(1))
+    if (/^--user=/i.test(args[0] ?? '')) {
+      return setAddress(ctx, [args[0]?.slice('--user='.length) ?? '', ...args.slice(1)])
     }
     if (args[0] === '-m') return setSubject(ctx, args.slice(1))
     if (args[0] === 'add') return add(ctx, args.slice(1), stdin)
@@ -66,7 +82,12 @@ export const mailCommand: CommandSpec = {
 
 function status(ctx: ShellCtx) {
   const draft = ctx.rt.outbox.draft
-  const lines = [`relay: ${ctx.rt.mail.configured ? 'configured' : 'off'}`, `subject: ${draft.subject || '(unset)'}`, 'staged:']
+  const lines = [
+    `relay: ${ctx.rt.mail.configured ? 'configured' : 'off'}`,
+    `user: ${draft.from || '(unset)'}`,
+    `subject: ${draft.subject || '(unset)'}`,
+    'staged:',
+  ]
   if (!draft.files.length && !draft.notes.length) lines.push('  (empty)')
   for (const file of draft.files) lines.push(`  ${file}`)
   for (const note of draft.notes) lines.push(`  comment ${note.about || '(message)'}`)
@@ -76,14 +97,35 @@ function status(ctx: ShellCtx) {
     lines.push('not staged:')
     for (const path of unstaged) lines.push(`  ${path}`)
   }
-  if (!draft.files.length && !draft.notes.length) {
-    lines.push('', 'nothing staged. mail add . stages the current directory.')
-  } else if (!draft.subject) {
-    lines.push('', 'mail -m "subject", then mail push.')
+  const next: string[] = []
+  if (!draft.from) next.push('mail --user you@example.com')
+  if (!draft.subject) next.push('mail -m "subject"')
+  if (!draft.files.length && !draft.notes.length) next.push('mail add .')
+  if (next.length) {
+    lines.push('', 'to send:')
+    next.forEach((item, index) => lines.push(`  ${index + 1}. ${item}`))
   } else {
     lines.push('', 'mail push sends the staged letter.')
   }
   return { code: 0, stdout: `${lines.join('\n')}\n` }
+}
+
+/** The guest's own address. It is what makes a reply reach them, so push requires it. */
+function setAddress(ctx: ShellCtx, args: string[]) {
+  if (args.length > 1) return { code: 1, stderr: 'mail: usage: mail --user you@example.com\n' }
+  const draft = ctx.rt.outbox.draft
+  if (!args.length) return { code: 0, stdout: `user: ${draft.from || '(unset)'}\n` }
+  const raw = args[0] ?? ''
+  if (!raw.trim()) {
+    draft.from = ''
+    return { code: 0, stdout: 'user cleared. mail push will ask for an address.\n' }
+  }
+  const address = mailAddress(raw)
+  if (!address) {
+    return { code: 1, stderr: 'mail: not an email address. Example: mail --user you@example.com\n' }
+  }
+  draft.from = address
+  return { code: 0, stdout: `user set to ${address}. The owner can reply there.\n` }
 }
 
 function setSubject(ctx: ShellCtx, args: string[]) {
@@ -142,27 +184,38 @@ function reset(ctx: ShellCtx, args: string[]) {
 async function push(ctx: ShellCtx) {
   const draft = ctx.rt.outbox.draft
   if (!draft.subject) return { code: 1, stderr: 'mail: missing subject. Use mail -m "subject".\n' }
+  if (!draft.from) {
+    return {
+      code: 1,
+      stderr: 'mail: no reply address. Use mail --user you@example.com. The letter stays staged.\n',
+    }
+  }
   const letter = composeLetter(ctx)
   if ('error' in letter) return { code: 1, stderr: letter.error }
   if (ctx.rt.outbox.sent >= MAIL_SEND_MAX) return { code: 1, stderr: 'mail: too many letters from this page.\n' }
   if (!ctx.rt.mail.configured) return { code: 1, stderr: 'mail: relay is not configured. The letter stays in this browser.\n' }
-  let status: 'sent' | 'skipped' | 'failed' = 'failed'
+  let status: MailResult['status'] = 'failed'
+  let detail = ''
   try {
-    status = await ctx.rt.mail.send({
+    const sent = await ctx.rt.mail.send({
       kind: 'letter',
       user: ctx.user.name,
+      from: draft.from,
       subject: draft.subject,
       path: letter.path,
       body: letter.body,
     })
-  } catch {
+    status = sent.status
+    detail = sent.detail ?? ''
+  } catch (err) {
     status = 'failed'
+    detail = err instanceof Error ? err.message : String(err)
   }
   if (status !== 'sent') {
     const why =
       status === 'skipped'
         ? 'mail: relay is not configured. The letter stays in this browser.\n'
-        : 'mail: delivery failed. The letter stays staged.\n'
+        : `mail: delivery failed${detail ? ` (${detail})` : ''}. The letter stays staged.\n`
     return { code: 1, stderr: why }
   }
   clearDraft(draft)

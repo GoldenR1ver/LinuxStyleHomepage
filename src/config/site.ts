@@ -24,8 +24,10 @@ export interface SiteConfig {
   /**
    * mail push notify URL. POST JSON. Empty means the letter stays in this browser.
    * https only, and not a GitHub host. The mail command cannot replace this URL.
-   * The endpoint must allow browser CORS. A Formspree form URL works.
-   * The form's recipient is who receives the letter. `email` below is only a label in the body.
+   * The endpoint must allow browser CORS. A Formspree form URL works, for example
+   * https://formspree.io/f/meaganpk. The form's recipient is who receives the letter,
+   * and the form must be confirmed in the Formspree dashboard.
+   * Free Formspree is 50 letters a month. `email` below is only a label in the body.
    */
   webhookUrl: string
   /** When true, also POST a digest of guest commands. Off by default. */
@@ -39,14 +41,17 @@ export const site: SiteConfig = {
   owner: 'owner',
   title: 'Yujiang Adam Li\'s Homepage',
   rootPassword: 'lyj050910!',
-  email: '25293198088@qq.com',
+  email: '2529319808@qq.com',
   github: {
     owner: '',
     repo: '',
     branch: 'main',
     contentRoot: 'content',
   },
-  webhookUrl: '',
+  // Formspree endpoint, confirmed. Empty means mail push only stages the letter.
+  // Guests need no account: the browser POSTs JSON here and the form's own
+  // recipient address receives the letter.
+  webhookUrl: 'https://formspree.io/f/meaganpk',
   reportVisits: false,
   journalDays: 7,
 }
@@ -63,17 +68,34 @@ const TOKEN_MARK = /ghp_|github_pat_|gho_|ghu_|ghs_|ghr_/
  */
 export function mailRelay(raw: string): string | null {
   const trimmed = raw.trim()
-  if (!trimmed || TOKEN_MARK.test(trimmed)) return null
+  return mailRelayProblem(trimmed) ? null : trimmed
+}
+
+/**
+ * Why a webhookUrl cannot be used. Empty when it is fine.
+ * The root login notes print this, so a typo is not just "relay: off".
+ */
+export function mailRelayProblem(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return 'webhookUrl is empty'
+  if (TOKEN_MARK.test(trimmed)) return 'webhookUrl looks like a token, not a relay URL'
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    return 'webhookUrl needs https://. A Formspree endpoint looks like https://formspree.io/f/abcdwxyz'
+  }
   let url: URL
   try {
     url = new URL(trimmed)
   } catch {
-    return null
+    return 'webhookUrl is not a valid URL'
   }
-  if (url.protocol !== 'https:') return null
-  if (url.username || url.password) return null
+  if (url.protocol !== 'https:') return 'webhookUrl must use https'
+  if (url.username || url.password) return 'webhookUrl must not embed a user name or password'
   const host = url.hostname.toLowerCase()
-  if (host === 'github.com' || host.endsWith('.github.com') || host.endsWith('.githubusercontent.com')) return null
-  if (url.searchParams.has('token') || url.searchParams.has('access_token')) return null
-  return trimmed
+  if (host === 'github.com' || host.endsWith('.github.com') || host.endsWith('.githubusercontent.com')) {
+    return 'webhookUrl must not point at GitHub'
+  }
+  if (url.searchParams.has('token') || url.searchParams.has('access_token')) {
+    return 'webhookUrl must not carry a token in the query string'
+  }
+  return ''
 }
