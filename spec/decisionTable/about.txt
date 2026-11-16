@@ -1,0 +1,19 @@
+decisionTable/ — one table per scenario
+
+File
+  decisions.csv    YAML inside a .csv name; one or more tables separated by ---
+
+Rules
+  Every combination of the conditions has a row. No otherwise.
+  A dash means the condition does not change the result.
+  unique means rows do not overlap; first means row order is priority.
+  A rejection action carries a code.
+  A condition that does not change the result is removed, not kept.
+
+Audit three questions
+  Missing: does every combination have a row?
+  Overlap: on a unique table, can two rows hit the same combination?
+  Dead: is a row unreachable?
+
+Exit
+  G-DT-01 (next round) reports zero missing, overlapping, dead, or unknown rows.

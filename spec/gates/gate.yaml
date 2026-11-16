@@ -1,0 +1,100 @@
+# INT-HOME round 5. One predicate per gate, one negative test per gate.
+# Field rules live in about.txt.
+gates:
+  - id: G-WORD-01
+    type: spec
+    predicate: "spec/spec.yaml、spec/const.yaml、intent/intent.yaml 的非注释行不含 should / may / 可以 / 快速 / 支持 / 处理 / 等 / 尽量"
+    placement: pre-commit
+    severity: block
+    runner: tools/gates/bannedWords.mjs
+    cost_p95: 0.4s
+    on_fail: "文件:行 + 命中的词 + 改法：换成一个可判的动词"
+    owner: spec
+    negative_test: tests/gates/test_banned_words.test.ts
+    reviewed_at: 2026-11-16
+    review_by: 2027-02-14
+    waiver: none
+
+  - id: G-DRAFT-01
+    type: spec
+    predicate: "content/ 下任一文本文件的前五行不含 DRAFT: unpublished，且任一路径段都不是 drafts"
+    placement: pre-commit
+    severity: block
+    runner: tools/gates/draftCheck.mjs
+    cost_p95: 0.3s
+    on_fail: "文件路径 + 命中的痕迹 + 修法：移回 drafts/，或删掉标记行确认发布"
+    owner: spec
+    negative_test: tests/gates/test_draft_gate.test.ts
+    reviewed_at: 2026-11-16
+    review_by: 2027-02-14
+    waiver: none
+
+  - id: G-REF-01
+    type: spec
+    predicate: "spec/spec.yaml 的 tests、spec/const.yaml 的 check.ref、tests/MANIFEST.yaml 的 path 与四份 UML 文档里的文件路径都能打开，且 tests/ 下每个用例都已登记"
+    placement: pre-commit
+    severity: block
+    runner: tools/gates/refsCheck.mjs
+    cost_p95: 0.5s
+    on_fail: "文件:行 + 断链的路径 + 改哪一份文档的哪一行"
+    owner: spec
+    negative_test: tests/gates/test_refs.test.ts
+    reviewed_at: 2026-11-16
+    review_by: 2027-02-14
+    waiver: none
+
+  - id: G-INV-01
+    type: correctness
+    predicate: "spec/const.yaml 的每条约束都有 check.type 与 check.ref，且 ref 里的路径存在"
+    placement: pr
+    severity: block
+    runner: tools/gates/constCoverage.mjs
+    cost_p95: 1s
+    on_fail: "const.yaml:行 + 缺 check 的条目 id + 该建哪个测试文件"
+    owner: spec
+    negative_test: tests/gates/test_inv_gate.test.ts
+    reviewed_at: 2026-11-16
+    review_by: 2027-02-14
+    waiver: none
+
+  - id: G-DEP-01
+    type: architecture
+    predicate: "src/kernel 下任一文件不 import src/ui、src/shell、src/remote、src/mux 或 src/app"
+    placement: pr
+    severity: block
+    runner: tools/gates/depCheck.mjs
+    cost_p95: 0.8s
+    on_fail: "文件:行 + 越界的 import + 目标区 + 文档链接：const.yaml 的 DEP-01"
+    owner: arch
+    negative_test: tests/gates/test_dep_gate.test.ts
+    reviewed_at: 2026-11-16
+    review_by: 2027-02-14
+    waiver: none
+
+  - id: G-DT-01
+    type: spec
+    predicate: "DT-PUBLISH 的 10 个条件组合每个都有行；unique 下无重叠、无死行、无未知条件或动作"
+    placement: merge
+    severity: block
+    runner: tools/gates/dtCheck.mjs
+    cost_p95: 0.6s
+    on_fail: "表 id + 漏掉的组合或重叠的行号对 + 该补哪一列"
+    owner: spec
+    negative_test: tests/gates/test_dt_check.test.ts
+    reviewed_at: 2026-11-16
+    review_by: 2027-02-14
+    waiver: none
+
+  - id: G-TEST-01
+    type: integration
+    predicate: "vitest 报告里 numFailedTests 为 0 且 numTotalTests 大于 0"
+    placement: merge
+    severity: block
+    runner: npm test
+    cost_p95: 3s
+    on_fail: "失败的用例名 + 来源 id + 最近一次通过的 commit"
+    owner: ci
+    negative_test: tests/gates/test_suite_gate.test.ts
+    reviewed_at: 2026-11-16
+    review_by: 2027-02-14
+    waiver: none

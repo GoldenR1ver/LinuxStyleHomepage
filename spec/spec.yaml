@@ -1,0 +1,161 @@
+# INT-HOME, round 5. One rule becomes one or more shall sentences.
+# Field rules live in spec/about.txt.
+meta:
+  intent: INT-HOME
+  round: 5
+  ears: "While <state>, When <trigger>, Where <feature>, the <system> shall <response>"
+
+requirements:
+  - id: REQ-SG-01
+    type: state
+    while: "执行 npm run build"
+    system: 站点构建
+    shall: "manifest 登记的每个路径都对应 content/ 下的一个文件，且不含 intent/、spec/、tests/、uml/、tools/ 与 drafts/ 的路径"
+    traces: [R2]
+    tests: [tests/acc/test_site_publishes_content_only.test.ts]
+    status: decided
+
+  - id: REQ-SG-02
+    type: common
+    system: git
+    shall: "忽略 drafts/ 下除 README.txt 以外的全部文件，同时保留 drafts/README.txt 被跟踪"
+    traces: [R1]
+    tests: [tests/prop/test_drafts_never_published.test.ts]
+    status: decided
+
+  - id: REQ-SG-03
+    type: common
+    system: 仓库文档
+    shall: "README 与 drafts/README.txt 各含一段说明 chmod 只改当前浏览器 overlay、不产生提交、构建不保存 mode、静态资源可被直接请求"
+    traces: [R3]
+    tests: [tests/acc/test_docs_state_permission_limits.test.ts]
+    status: decided
+
+  - id: REQ-SG-04
+    type: common
+    system: 仓库
+    shall: "根部保留 intent/、spec/、tests/、uml/、tools/gates/ 与 drafts/，九件产物逐条可打开"
+    traces: [R4]
+    tests: [tests/prop/test_architecture_artifacts.test.ts]
+    status: decided
+
+  - id: REQ-SG-05
+    type: common
+    system: 命令行界面
+    shall: "命令名集合不含 specgate，help 与 man 对该名返回 not found，Tab 补全不产生该候选"
+    traces: [R5]
+    tests: [tests/acc/test_no_specgate_command.test.ts]
+    status: decided
+
+  - id: REQ-SG-06
+    type: common
+    system: 登录界面
+    shall: "motd 与 issue 的文本中 Specgate 出现 0 次，且 motd 仍指向 help"
+    traces: [R5]
+    tests: [tests/acc/test_motd_clean.test.ts]
+    status: decided
+
+  - id: REQ-SG-07
+    type: counterexample
+    never: "manifest 出现 /drafts/ 开头的路径"
+    check: { type: property, ref: tests/prop/test_drafts_never_published.test.ts }
+    traces: [R2]
+    status: decided
+
+  - id: REQ-SG-08
+    type: counterexample
+    never: "drafts/ 下除 README.txt 以外的文件被 git 跟踪"
+    check: { type: property, ref: tests/prop/test_drafts_never_published.test.ts }
+    traces: [R1]
+    status: decided
+
+  - id: REQ-SG-09
+    type: counterexample
+    never: "文档声称 chmod 能让其他访客看不到文件"
+    check: { type: property, ref: tests/acc/test_docs_state_permission_limits.test.ts }
+    traces: [R3]
+    status: decided
+
+  - id: REQ-SG-10
+    type: counterexample
+    never: "manifest 出现 /home/owner/specgate 开头的路径"
+    check: { type: property, ref: tests/prop/test_nothing_under_specgate.test.ts }
+    traces: [R2]
+    status: decided
+
+  - id: REQ-SG-11
+    type: counterexample
+    never: "content/ 下出现名为 specgate 的路径段"
+    check: { type: property, ref: tests/prop/test_nothing_under_specgate.test.ts }
+    traces: [R2]
+    status: decided
+
+  - id: REQ-SG-12
+    type: counterexample
+    never: "命令名、help 输出、man 条目标题或补全候选出现 specgate"
+    check: { type: property, ref: tests/prop/test_no_hint_anywhere.test.ts }
+    traces: [R5]
+    status: decided
+
+  - id: REQ-SG-13
+    type: common
+    system: 门的判定脚本
+    shall: "六道文档门各自以 0 问题退出，且每门登记一个 negative_test 文件"
+    traces: [R4]
+    tests: [tests/gates/test_gate_suite.test.ts]
+    status: decided
+
+  - id: REQ-SG-16
+    type: state
+    while: "content/ 下出现草稿痕迹"
+    system: 站点构建
+    shall: "以非 0 退出，并在错误信息中给出 G-DRAFT-01、泄漏路径与修法"
+    traces: [R1]
+    tests: [tests/acc/test_draft_guard.test.ts]
+    status: decided
+
+  - id: REQ-SG-17
+    type: common
+    system: 站点构建
+    shall: "content/ 干净时构建以 0 退出，且 emit 的文件集合与第 4 轮相同"
+    traces: [R1]
+    tests: [tests/acc/test_draft_guard.test.ts]
+    status: decided
+
+  - id: REQ-SG-18
+    type: common
+    system: 门的判定脚本
+    shall: "G-DRAFT-01 与构建调用同一个 check 函数，实现的文件只有一个"
+    traces: [R2]
+    tests: [tests/gates/test_draft_gate.test.ts]
+    status: decided
+
+  - id: REQ-SG-19
+    type: counterexample
+    never: "草稿在站点上存在可访问路径"
+    check: { type: property, ref: tests/acc/test_draft_guard.test.ts }
+    traces: [R3]
+    status: decided
+
+  - id: REQ-SG-20
+    type: counterexample
+    never: "六个文档门中有任一以非 0 退出"
+    check: { type: reference, ref: tools/gates/run.mjs }
+    traces: [R4]
+    status: decided
+
+  - id: REQ-SG-14
+    type: event
+    when: "drafts/ 与 content/ 出现同名文件"
+    system: 站点构建
+    shall: ""
+    blocked_by: Q1
+    status: undecided
+
+  - id: REQ-SG-15
+    type: event
+    when: "草稿需要访问控制"
+    system: 站点
+    shall: ""
+    blocked_by: Q2
+    status: undecided

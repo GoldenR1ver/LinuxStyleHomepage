@@ -1,0 +1,21 @@
+tests/ — grouped by oracle, not by feature
+
+Layout
+  acc/      golden: one file per shall, expected values from the spec
+  prop/     property: one file per constraint, invariants and forbidden states
+  lint/     structure: layering and static shape
+  gates/    metatest: each gate's own negative test
+  _support/ repository helpers shared by the layers
+
+Rules
+  A test reads the repository or calls a public function. It never copies the
+  implementation's table by hand; `_support/repo.ts` holds the artifact list,
+  copied from the spec and reviewed against it.
+  One test file answers one source id; MANIFEST.yaml records which.
+  A gate test breaks a sample on purpose and asserts the gate goes red.
+  A skip names the step it waits for. An empty file is not a pass.
+
+Exit
+  Every file under tests/ appears in MANIFEST.yaml.
+  Every source id resolves to spec/spec.yaml, spec/const.yaml or gate.yaml.
+  npm test is green.

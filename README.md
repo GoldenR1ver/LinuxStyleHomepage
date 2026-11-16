@@ -33,6 +33,43 @@ Files in `content/` are the filesystem visitors see.
 
 Text files are markdown, `.txt`, and short files with no extension. PDF and images are binary: `cat` refuses them and `wget` downloads them. Text larger than 500KB is not inlined.
 
+## Specgate architecture
+
+This repository carries one live round of the SpecgateWorkflow as an architecture document, not as a feature of the site. `intent/`, `spec/`, `tests/`, `uml/`, and `tools/gates/` hold the nine steps; nothing in them is published.
+
+The site's filesystem is built from `content/` alone. There is no mount table, no `specgate` command, and no entry in `motd` or `issue`: a visitor sees exactly the pages the homepage had before this architecture existed.
+
+Why keep it in the repository at all: it is the process the owner uses to change the site. A round starts by editing `intent/intent.yaml`, flows through spec, the decision table, and the invariants, and is judged by six gates.
+
+```bash
+node tools/gates/run.mjs     # the six document gates
+npm test                     # the suite, including each gate's negative test
+```
+
+| Gate | Placement | Subject |
+| --- | --- | --- |
+| `G-WORD-01` | pre-commit | vague words in `intent/` and `spec/` |
+| `G-DRAFT-01` | pre-commit | a draft that leaked into `content/` |
+| `G-REF-01` | pre-commit | paths in `spec/`, `tests/MANIFEST.yaml`, `uml/` |
+| `G-INV-01` | pr | every constraint in `spec/const.yaml` has a check |
+| `G-DEP-01` | pr | `src/kernel` never imports an upper layer |
+| `G-DT-01` | merge | `DT-PUBLISH` has no gap, overlap, or dead row |
+| `G-TEST-01` | merge | the suite is green and not empty |
+
+`DT-PUBLISH` is the table that decides a file's fate at build time: only `content/` reaches `dist/fs`. Publishing anything else would need a new row there, and `G-DT-01` would catch its absence.
+
+## Continuous integration
+
+`.github/workflows/deploy-pages.yml` runs three steps on every push to `main`:
+
+```bash
+npm ci        # installs from package-lock.json, fails if it is out of sync
+npm test      # the whole suite, which itself runs the six document gates
+npm run build # tsc --noEmit, then vite build, which stops on G-DRAFT-01
+```
+
+The build then uploads `dist/` to GitHub Pages. The workflow itself is unchanged by this architecture: the gates ride inside `npm test`, because `tests/gates/test_gate_suite.test.ts` spawns `tools/gates/run.mjs`.
+
 ## Machine settings
 
 Edit only `src/config/site.ts`:
@@ -64,6 +101,67 @@ A guest write must also fall under `/tmp/<name>` or `/var/guestbook/`. Public pa
 | edit about, notes, projects   | no                                                 | yes, via GitHub        |
 | `chmod` / `chown`             | `chmod` on files they own                          | both, on any file      |
 | `rollback`                    | no                                                 | yes                    |
+
+## Permissions are not access control
+
+`chmod` changes a mode bit in this browser's overlay and nothing else. It is a
+label that makes the terminal read like Linux; it is **not access control**.
+Four facts, each checkable:
+
+1. `chmod` writes only a mode. It queues no remote change, so `seal` commits
+   nothing and the mode never leaves the browser.
+2. The build stores no mode. `vite/content.ts` records path, size, mtime,
+   encoding, and text, and `shippedMode` recomputes 0644/0755 on every load. A
+   new visitor, or a redeploy, resets every bit.
+3. The mode lives in this browser's IndexedDB overlay. Another browser starts
+   from the same image with the same 0644.
+4. Every published file is a static asset. `/fs/home/owner/about.txt` answers
+   with the bytes over plain HTTP, whether or not the terminal would refuse to
+   `cat` it.
+
+Two consequences worth stating plainly:
+
+- `chown` is not a fix either. Any name other than `root` logs in as a guest
+  with that name and the password ignored, so `chown 600 owner` just means "log
+  in as `owner`".
+- `rootPassword` ships in the frontend bundle. It keeps honest visitors out of
+  the editor; it does not protect a file.
+
+## Drafts
+
+Unfinished work goes in `drafts/` at the repository root, never in `content/`.
+That directory is ignored by git except for its own `README.txt`, and the build
+refuses a draft that leaked into `content/`, so a draft has no URL at all.
+
+```text
+drafts/*            ignored
+drafts/README.txt   tracked, explains the rule
+```
+
+A draft starts with one marker line:
+
+```text
+DRAFT: unpublished
+```
+
+`G-DRAFT-01` fails the build when a text file under `content/` carries that
+marker in its first five lines, or when a path segment under `content/` is named
+`drafts`. `npm run dev` prints the same finding as a warning so you see it before
+you push. Publishing therefore takes a deliberate act: copy the draft into
+`content/` and delete the marker line.
+
+```bash
+node tools/gates/draftCheck.mjs   # the same check, on demand
+npm run build                     # stops with G-DRAFT-01 if a draft leaked
+```
+
+Verify with the built manifest rather than with `ls -l`:
+
+```bash
+npm run build
+node -e "const m=require('./dist/fs/manifest.json');console.log(m.files.filter(f=>/draft|spec|intent|uml/.test(f.path)))"
+# [] means nothing outside content/ was published
+```
 
 ## Root publishes
 
@@ -166,14 +264,20 @@ Append an entry in the matching file under `src/shell/commands/`:
 ## Layout
 
 ```text
-content/                 pages visitors can cat
+content/                 pages visitors can cat, and the only published tree
+drafts/                  local drafts: git-ignored, never published
+intent/                  one round: intent.yaml, prototype.md
+spec/                    spec, const, decision table, gates
+tests/                   suite grouped by oracle, plus MANIFEST.yaml
+uml/                     state, sequence and dependency diagrams
+tools/gates/             one judgment script per gate
 src/config/site.ts       password, GitHub, mail
 src/kernel/              paths, policy, filesystem, log
 src/shell/               parser and commands
 src/remote/              GitHub commits and mail
 src/mux/                 pane layout
 src/ui/                  terminal view
-vite/content.ts          packs content/ into the site
+vite/content.ts          packs content/ into the site, and nothing else
 ```
 
 ## Limits

@@ -1,0 +1,43 @@
+gates/ — one predicate per gate
+
+Files
+  gate.yaml    the six gates of this round  about.txt    this page
+
+Placements
+  save         formatting and whitespace
+  pre-commit   vague words, broken links
+  pr           architecture, constraint coverage
+  merge        full suite, decision table audit
+  release      migration dry run
+  runtime      error rate, latency
+
+Cheap gates come first so people keep running them. The binding ones sit at
+merge, where a red gate stops the commit. The expensive ones come last.
+
+Fields
+  id, type, predicate, placement, severity, runner, cost_p95,
+  on_fail, owner, negative_test, reviewed_at, review_by, waiver
+
+Rules
+  One gate carries one predicate. Two judgments are two gates.
+  A gate without a negative test is not a gate.
+  on_fail names the file, the line and the fix, not just an error code.
+  A gate that has not gone red in 90 days is deleted or demoted.
+  A waiver names who may grant it and the day it expires.
+  A gate does not read the private internals of the code it guards.
+
+Standing a gate up, ten steps
+  1 write the concrete failure case
+  2 check that it is decidable, or turn it into a review list
+  3 pick the judgment: invariant, differential, lint, reference
+  4 pick the placement
+  5 fix severity and waiver
+  6 write on_fail with the fix
+  7 write the negative test
+  8 set the cost budget
+  9 register it here
+  10 set reviewed_at + 90 days as review_by
+
+Exit
+  Every gate has a runner, a negative_test and a review_by date.
+  node tools/gates/run.mjs reports zero problems.

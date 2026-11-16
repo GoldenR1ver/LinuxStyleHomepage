@@ -3,3 +3,7 @@ dist/
 .DS_Store
 *.local
 .vite/
+
+# Local drafts. Nothing here is committed or published: the build walks content/ only.
+drafts/*
+!drafts/README.txt

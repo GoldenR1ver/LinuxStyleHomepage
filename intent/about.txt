@@ -1,0 +1,19 @@
+intent/ — the first file of a round
+
+Files
+  intent.yaml     five blocks: story, rules, judge, questions
+  prototype.md    prototype design description for this round
+  about.txt       this page
+
+Rules
+  A person writes this directory. The agent only reads it.
+  One intent carries one thing. Two things means two intents.
+  Every rule has an example with a number or a concrete path.
+  Every judge has a measurable and a check.
+  Questions only grow. Close one with a status change; do not delete it.
+  A condition that is not here does not enter spec. Write a question instead.
+
+Exit
+  story, rules, judge and questions are present.
+  Every rule has an example.
+  Every question has an owner.
