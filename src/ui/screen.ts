@@ -113,6 +113,7 @@ export function startApp(rt: Runtime, warning = '') {
     }
     void shellLoop(view, pane.ctx, {
       intro: introText,
+      boot: 'index',
       onPrompt: () => renderStatus(),
       onCommand: (line, code) => noteVisit(pane.ctx.user.name, pane.ctx.user.role, line, code),
     }).then((reason) => {

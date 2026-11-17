@@ -1,13 +1,21 @@
 import type { ShellCtx } from '../shell/context'
-import { writeFile } from '../shell/commands/helpers'
+import { hrefCommand, writeFile } from '../shell/commands/helpers'
+import { stripLinks } from '../kernel/escape'
 import { seal } from '../shell/seal'
 import type { Stage } from '../shell/result'
 import type { TermView } from './term'
 import { VimEngine, type VimKey } from './vim/engine'
 
-export async function presentStage(view: TermView, ctx: ShellCtx, stage: Stage): Promise<void> {
-  if (stage.kind === 'vim') await presentVim(view, ctx, stage)
-  else await presentDocument(view, stage)
+/**
+ * Present a stage. Returns a command when the reader clicked a link that points
+ * into this site; the caller runs it after the stage closes.
+ */
+export async function presentStage(view: TermView, ctx: ShellCtx, stage: Stage): Promise<string | undefined> {
+  if (stage.kind === 'vim') {
+    await presentVim(view, ctx, stage)
+    return undefined
+  }
+  return presentDocument(view, ctx, stage)
 }
 
 async function presentVim(
@@ -144,7 +152,12 @@ async function presentVim(
   })
 }
 
-async function presentDocument(view: TermView, stage: Extract<Stage, { kind: 'md' | 'pdf' }>): Promise<void> {
+async function presentDocument(
+  view: TermView,
+  ctx: ShellCtx,
+  stage: Extract<Stage, { kind: 'md' | 'pdf' }>,
+): Promise<string | undefined> {
+  let next: string | undefined
   await view.present((root, api) => {
     const bar = document.createElement('div')
     bar.className = 'stage-bar'
@@ -162,7 +175,7 @@ async function presentDocument(view: TermView, stage: Extract<Stage, { kind: 'md
     bar.append(title, command, button)
     const body = document.createElement('div')
     body.className = 'stage-body'
-    if (stage.kind === 'md') body.innerHTML = stage.text
+    if (stage.kind === 'md') body.innerHTML = stripLinks(stage.text)
     else {
       const frame = document.createElement('iframe')
       frame.className = 'stage-pdf'
@@ -172,6 +185,21 @@ async function presentDocument(view: TermView, stage: Extract<Stage, { kind: 'md
     }
     root.tabIndex = 0
     root.append(bar, body)
+
+    // A relative link is a path in this site, not a page the browser can fetch.
+    const onClick = (event: MouseEvent) => {
+      if (stage.kind !== 'md') return
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null
+      if (!anchor) return
+      const command = hrefCommand(ctx, stage.base, anchor.getAttribute('href') ?? '')
+      if (!command) return
+      event.preventDefault()
+      event.stopPropagation()
+      next = command
+      api.done()
+    }
+    body.addEventListener('click', onClick)
+
     let typed = ''
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape' || (event.ctrlKey && event.key.toLowerCase() === 'c') || (event.key === 'q' && !typed)) {
@@ -215,8 +243,12 @@ async function presentDocument(view: TermView, stage: Extract<Stage, { kind: 'md
     window.addEventListener('keydown', onWindow, true)
     api.onFocus(() => root.focus())
     root.focus()
-    return () => window.removeEventListener('keydown', onWindow, true)
+    return () => {
+      body.removeEventListener('click', onClick)
+      window.removeEventListener('keydown', onWindow, true)
+    }
   })
+  return next
 }
 
 async function saveBuffer(ctx: ShellCtx, path: string, text: string): Promise<{ error: string | null; notice: string }> {

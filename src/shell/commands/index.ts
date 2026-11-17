@@ -63,7 +63,10 @@ const labels = [
 
 const GUIDE = `home
 
-[1;36mTry to use 'cat /home/owner/about.txt' to read the about page.[0m
+[1;36mTry to use 'cat /home/owner/about.txt' to read the about page.
+
+Click a path to open it: a directory lists, a .md renders, a .pdf opens, a text file prints.
+'index' prints the map again.[0m
 
 Pages
   [1;33m/home/owner[0m                     about, projects, notes, resume

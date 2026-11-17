@@ -1,4 +1,5 @@
 import { FsError } from '../../kernel/vfs'
+import { stripLinks } from '../../kernel/escape'
 import type { ShellCtx } from '../context'
 import type { CommandResult } from '../result'
 import type { CommandSpec } from './types'
@@ -257,7 +258,7 @@ function positive(value: string | undefined): number {
 function readText(ctx: ShellCtx, file: string): string {
   const node = ctx.rt.fs.read(ctx.user, resolvePath(ctx, file))
   if (node.encoding !== 'utf8') throw new FsError('EINVAL', `${file}: binary file`)
-  return node.content
+  return stripLinks(node.content)
 }
 
 function countText(text: string): Counts {
@@ -335,7 +336,7 @@ function collect(ctx: ShellCtx, files: string[], recursive: boolean): { name: st
       throw err
     }
     if (node.encoding !== 'utf8') return
-    out.push({ name: file, text: node.content })
+    out.push({ name: file, text: stripLinks(node.content) })
   }
   for (const file of files) visit(file)
   return out

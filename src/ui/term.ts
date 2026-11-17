@@ -1,5 +1,6 @@
+import { stripLinks } from '../kernel/escape'
 import type { PickOptions, PickedFile } from '../shell/host'
-import { parseAnsi } from './ansi'
+import { parseAnsi, type Span } from './ansi'
 
 export interface Prompt {
   plain?: string
@@ -96,6 +97,32 @@ export class TermView {
         { once: true, capture: true },
       )
     })
+    this.scroll.addEventListener('click', (event) => this.onLinkClick(event))
+  }
+
+  /** A link in the scrollback runs a command, but only when the prompt is waiting. */
+  private onLinkClick(event: MouseEvent) {
+    const anchor = event.target instanceof Element ? event.target.closest('a[data-cmd]') : null
+    if (!(anchor instanceof HTMLElement)) return
+    const raw = anchor.dataset.cmd ?? ''
+    if (!raw) return
+    if (this.holdsSelection()) return
+    event.preventDefault()
+    let command = raw
+    try {
+      command = decodeURIComponent(raw)
+    } catch {
+      /* an undecodable target is used as it is */
+    }
+    this.submitLine(command)
+  }
+
+  /** Type the line and press Enter. Ignored unless a prompt is waiting. */
+  submitLine(value: string) {
+    if (this.mode !== 'line' || !this.pending) return
+    this.activate()
+    this.setInput(value)
+    this.submit()
   }
 
   private activate() {
@@ -271,7 +298,8 @@ export class TermView {
 
   pager(text: string): Promise<void> {
     this.mode = 'pager'
-    this.pagerLines = text.length ? text.replace(/\n$/, '').split('\n') : ['']
+    const plain = stripLinks(text)
+    this.pagerLines = plain.length ? plain.replace(/\n$/, '').split('\n') : ['']
     this.pagerTop = 0
     this.pagerEl.hidden = false
     this.input.value = ''
@@ -455,15 +483,7 @@ export class TermView {
     line.className = `ln ${kind}`
     if (!text) line.append(document.createTextNode('\u00a0'))
     else {
-      for (const part of parseAnsi(text)) {
-        if (!part.className) line.append(document.createTextNode(part.text))
-        else {
-          const node = document.createElement('span')
-          node.className = part.className
-          node.textContent = part.text
-          line.append(node)
-        }
-      }
+      for (const part of parseAnsi(text)) line.append(renderPart(part))
     }
     this.scroll.append(line)
     while (this.scroll.childElementCount > 2000) this.scroll.firstElementChild?.remove()
@@ -490,6 +510,22 @@ function span(className: string, value: string): HTMLSpanElement {
   node.className = className
   node.textContent = value
   return node
+}
+
+/** A run of text, colored, or linked. A `cmd:` link is typed at the prompt on click. */
+function renderPart(part: Span): Node {
+  if (!part.href) return part.className ? span(part.className, part.text) : document.createTextNode(part.text)
+  const anchor = document.createElement('a')
+  anchor.className = part.className ? `ln-link ${part.className}` : 'ln-link'
+  anchor.textContent = part.text
+  if (part.href.startsWith('cmd:')) {
+    anchor.dataset.cmd = part.href.slice(4)
+  } else {
+    anchor.href = part.href
+    anchor.target = '_blank'
+    anchor.rel = 'noopener'
+  }
+  return anchor
 }
 
 function text(value: string): Text {

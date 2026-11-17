@@ -133,6 +133,14 @@ body { overflow: hidden; }
 
 .ln.err { color: var(--red); }
 .ln.dim, .dim { color: var(--dim); }
+.ln-link {
+  color: var(--blue);
+  text-decoration: none;
+  cursor: pointer;
+  border-bottom: 1px dotted color-mix(in srgb, currentColor 55%, transparent);
+}
+.ln-link:hover { border-bottom-style: solid; }
+.ln-link:focus-visible { outline: 1px solid var(--blue); outline-offset: 1px; }
 .bold { font-weight: 700; }
 .fg-red { color: #e06c75; }
 .fg-green { color: #98c379; }
@@ -312,6 +320,7 @@ body { overflow: hidden; }
 .stage-doc h2 { font-size: 1.4em; }
 .stage-doc p, .stage-doc ul, .stage-doc ol, .stage-doc blockquote, .stage-doc table { margin: 0.7em 0; }
 .stage-doc a { color: var(--blue); }
+.stage-doc a:hover { text-decoration: underline; }
 .stage-doc code {
   font-family: ui-monospace, monospace;
   background: #1c1c1c;

@@ -1,4 +1,6 @@
+import { dirname } from '../../kernel/path'
 import { FsError } from '../../kernel/vfs'
+import { stripLinks } from '../../kernel/escape'
 import { renderMarkdown } from '../../ui/markdown'
 import type { CommandSpec } from './types'
 import { errorMessage, resolvePath } from './helpers'
@@ -65,7 +67,7 @@ export const viewCommands: CommandSpec[] = [
       try {
         const node = ctx.rt.fs.read(ctx.user, path)
         if (node.encoding !== 'utf8') return { code: 1, stderr: `md: ${name}: binary file\n` }
-        return { code: 0, stage: { kind: 'md', title: path, text: renderMarkdown(node.content) } }
+        return { code: 0, stage: { kind: 'md', title: path, text: renderMarkdown(stripLinks(node.content)), base: dirname(path) } }
       } catch (err) {
         return { code: 1, stderr: `md: ${name}: ${errorMessage(err)}\n` }
       }

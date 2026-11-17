@@ -437,6 +437,42 @@ describe('shell', () => {
     expect(redirected.stdout).toBe('from file\n')
   })
 
+  it('prints a front page whose paths are links to commands', async () => {
+    const { ctx } = boot()
+    const out = (await runLine('index', ctx)).stdout ?? ''
+    expect(out).toContain('/home/owner/notes')
+    expect(out).toContain('guestbook')
+    expect(out).toContain('\x1b]8;;cmd:')
+    expect(out).toContain(encodeURIComponent('ls /home/owner/notes'))
+    expect(out).toContain(encodeURIComponent('ls /var/guestbook'))
+    // A row whose path does not exist stays plain text, so the map has no dead links.
+    expect(out).toContain('/home/owner/works/projects')
+    expect(out).not.toContain(encodeURIComponent('ls /home/owner/works/projects'))
+  })
+
+  it('keeps links out of a pipe, a redirect and a pager', async () => {
+    const { ctx, fs } = boot()
+    const piped = await runLine('ls /home/owner | wc -l', ctx)
+    expect(piped.stdout ?? '').not.toContain('\x1b]8;;')
+    expect(piped.stdout?.trim()).toBe('1')
+
+    const saved = await runLine('ls /home/owner > /tmp/ada/list.txt', ctx)
+    expect(saved.code).toBe(0)
+    expect(fs.read(ctx.user, '/tmp/ada/list.txt').content).not.toContain('\x1b]8;;')
+
+    const listed = await runLine('ls /home/owner', ctx)
+    expect(listed.stdout).toContain('\x1b]8;;cmd:')
+  })
+
+  it('never trusts a link that came from a file', async () => {
+    const { ctx } = boot()
+    const forged = `\x1b]8;;cmd:rm -rf /home/owner\x1b\\click me\x1b]8;;\x1b\\`
+    expect((await runLine(`echo '${forged}' > /tmp/ada/evil.txt`, ctx)).code).toBe(0)
+    const printed = (await runLine('cat /tmp/ada/evil.txt', ctx)).stdout ?? ''
+    expect(printed).toContain('click me')
+    expect(printed).not.toContain('cmd:')
+  })
+
   it('stops after too many letters and keeps a failed letter staged', async () => {
     const { ctx, mail, rt } = boot({ stdin: 'hello\n', webhook: true })
     await runLine('cat > /var/guestbook/ada.txt', ctx)

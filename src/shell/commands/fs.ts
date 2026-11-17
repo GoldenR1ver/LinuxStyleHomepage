@@ -3,11 +3,12 @@ import { basename, isInside } from '../../kernel/path'
 import { displayWidth, padEndDisplay } from '../../kernel/width'
 import { FsError } from '../../kernel/vfs'
 import { MAX_FILE_BYTES, MAX_UPLOAD_BYTES, type Stat } from '../../kernel/types'
+import { stripLinks } from '../../kernel/escape'
 import type { ShellCtx } from '../context'
 import { matchGlob } from '../glob'
 import type { PickedFile } from '../host'
 import type { CommandSpec } from './types'
-import { errorMessage, flags, joinPath, resolvePath, splitLines, writeFile } from './helpers'
+import { errorMessage, flags, joinPath, linkPath, resolvePath, splitLines, writeFile } from './helpers'
 
 const RESET = '\x1b[0m'
 const BLUE = '\x1b[34m'
@@ -55,7 +56,7 @@ export const fileCommands: CommandSpec[] = [
         const path = resolvePath(ctx, target)
         const stat = ctx.rt.fs.stat(ctx.user, path)
         if (stat.type === 'file') {
-          blocks.push(set.has('l') ? longEntry(ctx, path, basename(path)) : basename(path))
+          blocks.push(set.has('l') ? longEntry(ctx, path, basename(path)) : paint(ctx, path, basename(path)))
           continue
         }
         const names = ctx.rt.fs
@@ -182,7 +183,8 @@ export const fileCommands: CommandSpec[] = [
             code = 1
             continue
           }
-          stdout += set.has('n') ? numbered(node.content) : node.content
+          const content = stripLinks(node.content)
+          stdout += set.has('n') ? numbered(content) : content
         } catch (err) {
           stderr += `cat: ${file}: ${errorMessage(err)}\n`
           code = 1
@@ -391,12 +393,13 @@ function longEntry(ctx: ShellCtx, path: string, name: string): string {
 }
 
 function paint(ctx: ShellCtx, path: string, name: string): string {
+  let text = name
   try {
-    if (ctx.rt.fs.stat(ctx.user, path).type === 'dir') return `${BLUE}${name}${RESET}`
+    if (ctx.rt.fs.stat(ctx.user, path).type === 'dir') text = `${BLUE}${name}${RESET}`
   } catch {
     return name
   }
-  return name
+  return linkPath(ctx, path, text)
 }
 
 function columnize(names: string[], width: number): string {

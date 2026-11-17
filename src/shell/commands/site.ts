@@ -1,12 +1,55 @@
 import { basename } from '../../kernel/path'
+import { padEndDisplay, displayWidth } from '../../kernel/width'
+import { stripLinks } from '../../kernel/escape'
 import type { RemoteChange } from '../../kernel/types'
 import { FsError } from '../../kernel/vfs'
 import type { PaneDir } from '../../mux/host'
+import type { ShellCtx } from '../context'
 import type { CommandSpec } from './types'
 import { mailCommand } from './mail'
-import { resolvePath } from './helpers'
+import { link, linkPath, resolvePath } from './helpers'
 
 export const siteCommands: CommandSpec[] = [
+  {
+    name: 'index',
+    group: 'site',
+    summary: 'the front page',
+    usage: 'index',
+    manual:
+      'Print the map of this site. Every row is a link: click a directory to list it, a markdown file to render it, a pdf to open it, a text file to read it. The counts come from the file tree, so the map cannot fall behind the content. index runs once after login.',
+    run(ctx) {
+      const home = '/home/owner'
+      const notes = `${home}/notes`
+      const rows: string[] = []
+      const row = (label: string, path: string, note = '') => {
+        const head = col(label, 22) + col(note, 13)
+        rows.push(linkPath(ctx, path, `${head}${path}`))
+      }
+      rows.push(`${ctx.user.name}@${ctx.env.HOSTNAME ?? 'home'}: index`)
+      rows.push('')
+      const projects = `${home}/works/projects`
+      const researches = `${home}/works/researches`
+      row('🛠  projects', projects, plural(count(ctx, projects), 'folder', 'folders'))
+      row('📄  researches', researches, plural(count(ctx, researches), 'paper', 'papers'))
+      row('📚  notes', notes)
+      for (const topic of list(ctx, notes)) {
+        const path = `${notes}/${topic}`
+        if (kind(ctx, path) !== 'dir') continue
+        const label = `  📁 ${topic}`
+        row(label, path, plural(count(ctx, path), 'entry', 'entries'))
+      }
+      for (const name of list(ctx, home)) {
+        const path = `${home}/${name}`
+        if (kind(ctx, path) !== 'file') continue
+        row(`${/\.pdf$/i.test(name) ? '📎' : '📄'}  ${name}`, path)
+      }
+      rows.push('')
+      row('💬  guestbook', '/var/guestbook', 'leave a note')
+      rows.push('')
+      rows.push(`Use ${link('index', 'index')} prints this again.`)
+      return { code: 0, stdout: `${rows.join('\n')}\n` }
+    },
+  },
   {
     name: 'less',
     group: 'site',
@@ -23,7 +66,8 @@ export const siteCommands: CommandSpec[] = [
           .map((file) => {
             const node = ctx.rt.fs.read(ctx.user, resolvePath(ctx, file))
             if (node.encoding !== 'utf8') throw new FsError('EINVAL', `${file}: binary file, use wget`)
-            return files.length > 1 ? `==> ${file} <==\n${node.content}` : node.content
+            const content = stripLinks(node.content)
+            return files.length > 1 ? `==> ${file} <==\n${content}` : content
           })
           .join('\n')
       }
@@ -268,4 +312,37 @@ function stamp(ms: number): string {
   const date = new Date(ms)
   const p = (value: number) => String(value).padStart(2, '0')
   return `${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}:${p(date.getMinutes())}`
+}
+
+/** Visible names in a directory. A missing or unreadable directory is empty, not an error. */
+function list(ctx: ShellCtx, path: string): string[] {
+  try {
+    return ctx.rt.fs
+      .readdir(ctx.user, path)
+      .filter((name) => !name.startsWith('.'))
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+function count(ctx: ShellCtx, path: string): number {
+  return list(ctx, path).length
+}
+
+function kind(ctx: ShellCtx, path: string): 'dir' | 'file' | null {
+  try {
+    return ctx.rt.fs.stat(ctx.user, path).type === 'dir' ? 'dir' : 'file'
+  } catch {
+    return null
+  }
+}
+
+function plural(value: number, one: string, many: string): string {
+  return `${value} ${value === 1 ? one : many}`
+}
+
+/** Pad to a column, keeping at least one space when the text is wider than the column. */
+function col(text: string, width: number): string {
+  return padEndDisplay(text, width) + (displayWidth(text) >= width ? ' ' : '')
 }

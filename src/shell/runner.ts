@@ -1,5 +1,6 @@
 import { FsError } from '../kernel/vfs'
 import { resolve } from '../kernel/path'
+import { stripLinks } from '../kernel/escape'
 import { lookup } from './commands'
 import type { ShellCtx } from './context'
 import { expandAlias, expandWord } from './expand'
@@ -103,7 +104,8 @@ async function runPipeline(
     const piped = index > 0 || (index === 0 && feed !== '')
     result = await runSegment(segment, ctx, incoming, piped, depth, budget)
     stderr += result.stderr ?? ''
-    incoming = result.pager !== undefined ? '' : result.stdout ?? ''
+    // A link is a screen affordance, not data: a pipe must see the bare text.
+    incoming = result.pager !== undefined ? '' : stripLinks(result.stdout ?? '')
     if (result.logout || result.exitPane) break
   }
   return { ...result, stderr }
@@ -258,12 +260,12 @@ function applyRedirects(ctx: ShellCtx, segment: Segment, result: CommandResult):
   const errors = segment.redirects.filter((redirect) => redirect.fd === 2 && redirect.op !== '<')
   const errorTarget = errors[errors.length - 1]
   if (errorTarget) {
-    writeFile(ctx.rt.fs, ctx.user, onePath(ctx, errorTarget.target), stderr, errorTarget.op === '>>')
+    writeFile(ctx.rt.fs, ctx.user, onePath(ctx, errorTarget.target), stripLinks(stderr), errorTarget.op === '>>')
     stderr = ''
   }
   const outputTarget = output[output.length - 1]
   if (outputTarget) {
-    writeFile(ctx.rt.fs, ctx.user, onePath(ctx, outputTarget.target), stdout, outputTarget.op === '>>')
+    writeFile(ctx.rt.fs, ctx.user, onePath(ctx, outputTarget.target), stripLinks(stdout), outputTarget.op === '>>')
     stdout = ''
   }
   return { ...result, stdout, stderr }

@@ -7,7 +7,7 @@ export interface Download {
 
 export type Stage =
   | { kind: 'vim'; path: string | null; filename: string; text: string }
-  | { kind: 'md'; title: string; text: string }
+  | { kind: 'md'; title: string; text: string; base: string }
   | { kind: 'pdf'; title: string; url: string }
 
 export interface CommandResult {
