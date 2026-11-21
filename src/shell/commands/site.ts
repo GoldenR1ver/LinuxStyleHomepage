@@ -46,7 +46,7 @@ export const siteCommands: CommandSpec[] = [
       rows.push('')
       row('💬  guestbook', '/var/guestbook', 'leave a note')
       rows.push('')
-      rows.push(`Use ${link('index', 'index')} prints this again.`)
+      rows.push(`Use ${link('index', 'index')} to print this again.`)
       return { code: 0, stdout: `${rows.join('\n')}\n` }
     },
   },

@@ -2,6 +2,7 @@ import type { ShellCtx } from '../shell/context'
 import { completeLine } from '../shell/complete'
 import { runLine } from '../shell/runner'
 import type { CommandResult } from '../shell/result'
+import { INTRO_MS_MAX } from './anim'
 import { saveDownload } from './download'
 import { presentStage } from './present'
 import { promptParts } from './prompt'
@@ -25,7 +26,7 @@ export async function shellLoop(
       view.print(`${result.matches.slice(0, 80).join('  ')}\n`, 'dim')
     }
   }
-  if (opts.intro) view.print(opts.intro)
+  if (opts.intro) await view.print(opts.intro, 'out', { maxMs: INTRO_MS_MAX })
   if (opts.boot) {
     const end = await execute(view, ctx, opts.boot, false, opts)
     if (end) return end
@@ -94,8 +95,8 @@ async function run(view: TermView, ctx: ShellCtx, line: string): Promise<Command
     /* the command already reported a failed write */
   }
   if (result.clear) view.clear()
-  if (result.stdout) view.print(result.stdout)
-  if (result.stderr) view.print(result.stderr, 'err')
+  if (result.stdout) await view.print(result.stdout)
+  if (result.stderr) await view.print(result.stderr, 'err')
   if (result.pager !== undefined) await view.pager(result.pager)
   for (const file of result.downloads ?? []) saveDownload(file)
   return result

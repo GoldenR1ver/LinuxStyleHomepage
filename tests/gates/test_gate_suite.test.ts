@@ -24,7 +24,9 @@ describe('POST-01 the document gates pass together', () => {
     const source = read('tools/gates/run.mjs')
     const declared = [...source.matchAll(/\['(G-[A-Z]+-\d+)'/g)].map((match) => match[1]!)
     expect(declared.length).toBeGreaterThanOrEqual(6)
-    for (const id of declared) expect(run().stdout).toContain(id)
+    // One run answers every id; a run per id costs minutes and proves nothing more.
+    const stdout = run().stdout
+    for (const id of declared) expect(stdout).toContain(id)
   })
 
   it('anchors every child at the repository, so an outside run cannot false-green', () => {

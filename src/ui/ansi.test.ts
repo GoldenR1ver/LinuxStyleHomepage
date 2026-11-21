@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAnsi } from './ansi'
+import { parseAnsi, parseLines } from './ansi'
 
 const ESC = '\x1b'
 
@@ -27,5 +27,33 @@ describe('ansi', () => {
   it('leaves an unknown escape as text', () => {
     const spans = parseAnsi(`${ESC}[2Jx`)
     expect(spans.map((span) => span.text).join('')).toBe(`${ESC}[2Jx`)
+  })
+
+  it('reads a motion region and clamps its rate', () => {
+    const spans = parseAnsi(`${ESC}]5522;type;90${ESC}\\hi${ESC}]5522${ESC}\\!`)
+    expect(spans[0]).toMatchObject({ text: 'hi', anim: { mode: 'type', rate: 90 } })
+    expect(spans[1]?.anim).toBeUndefined()
+
+    const slow = parseAnsi(`${ESC}]5522;type;1${ESC}\\x`) // slower is clamped up
+    expect(slow[0]?.anim?.rate).toBe(30)
+    const fast = parseAnsi(`${ESC}]5522;type;9999${ESC}\\x`)
+    expect(fast[0]?.anim?.rate).toBe(240)
+    const fade = parseAnsi(`${ESC}]5522;fade;5${ESC}\\x`)
+    expect(fade[0]?.anim).toEqual({ mode: 'fade', rate: 20 })
+  })
+
+  it('carries color, links and motion across a newline', () => {
+    const text = `${ESC}[33ma${ESC}]8;;cmd:ls${ESC}\\b\nc${ESC}]8;;${ESC}\\!${ESC}[0m`
+    const lines = parseLines(text)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]?.spans.map((span) => span.text).join('')).toBe('ab')
+    expect(lines[1]?.spans.map((span) => span.text).join('')).toBe('c!')
+    expect(lines[1]?.spans[0]).toMatchObject({ className: 'fg-yellow', href: 'cmd:ls' })
+    expect(lines[1]?.spans[1]?.href).toBeUndefined()
+  })
+
+  it('closes a motion region that never ends', () => {
+    const lines = parseLines(`${ESC}]5522;type;90${ESC}\\open`)
+    expect(lines[0]?.spans[0]?.anim).toEqual({ mode: 'type', rate: 90 })
   })
 })

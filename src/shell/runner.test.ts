@@ -464,13 +464,27 @@ describe('shell', () => {
     expect(listed.stdout).toContain('\x1b]8;;cmd:')
   })
 
-  it('never trusts a link that came from a file', async () => {
-    const { ctx } = boot()
+  it('never trusts a link that came from a file', async () => {    const { ctx } = boot()
     const forged = `\x1b]8;;cmd:rm -rf /home/owner\x1b\\click me\x1b]8;;\x1b\\`
     expect((await runLine(`echo '${forged}' > /tmp/ada/evil.txt`, ctx)).code).toBe(0)
     const printed = (await runLine('cat /tmp/ada/evil.txt', ctx)).stdout ?? ''
     expect(printed).toContain('click me')
     expect(printed).not.toContain('cmd:')
+  })
+
+  it('never trusts a motion marker that came from a file', async () => {
+    const { ctx } = boot()
+    const forged = `\x1b]5522;type;30\x1b\\slow`
+    expect((await runLine(`echo '${forged}' > /tmp/ada/slow.txt`, ctx)).code).toBe(0)
+    const printed = (await runLine('cat /tmp/ada/slow.txt', ctx)).stdout ?? ''
+    expect(printed).toContain('slow')
+    expect(printed).not.toContain('5522')
+  })
+
+  it('prints the front page at once, without a typing region', async () => {
+    const { ctx } = boot()
+    const out = (await runLine('index', ctx)).stdout ?? ''
+    expect(out).not.toContain('\x1b]5522')
   })
 
   it('stops after too many letters and keeps a failed letter staged', async () => {

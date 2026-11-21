@@ -5,7 +5,10 @@ import { doctor } from '../kernel/doctor'
 import type { User } from '../kernel/types'
 import { publicHome } from '../config/site'
 import { Mux, type Layout, type Pane } from '../mux/mux'
+import { lookup } from '../shell/commands'
+import { link } from '../shell/commands/helpers'
 import { readIssue } from './issue'
+import { typeBlock } from './anim'
 import { shellLoop } from './loop'
 import { TermView } from './term'
 
@@ -321,14 +324,27 @@ function intro(rt: Runtime, user: User): string {
   if (previous) text += `Last login: ${previous}\n`
   try {
     const motd = rt.fs.read(user, '/etc/motd')
-    if (motd.encoding === 'utf8') text += motd.content.endsWith('\n') ? motd.content : `${motd.content}\n`
+    if (motd.encoding === 'utf8') {
+      const body = motd.content.endsWith('\n') ? motd.content : `${motd.content}\n`
+      text += typeBlock(linkQuotedCommands(body), 240)
+    }
   } catch {
-    text += 'help\n'
+    text += `${link('help', 'help')}\n`
   }
   if (user.role === 'root') {
     for (const note of doctor(rt.fs, rt.site)) text += `doctor: ${note}\n`
   }
   return text
+}
+
+/**
+ * Link a command the motd names in quotes, so the hint is one click.
+ * Only a quoted word that is a command is linked; any other text stays as written.
+ */
+function linkQuotedCommands(text: string): string {
+  return text.replace(/'([a-z][a-z0-9-]*)'/g, (whole: string, name: string) =>
+    lookup(name) ? `'${link(name, name)}'` : whole,
+  )
 }
 
 function ensureScratch(rt: Runtime, user: User) {

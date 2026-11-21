@@ -1,6 +1,7 @@
 import { stripLinks } from '../kernel/escape'
 import type { PickOptions, PickedFile } from '../shell/host'
-import { parseAnsi, type Span } from './ansi'
+import { MOTION_MS_MAX, parseLines, type Line as TextLine, type Span } from './ansi'
+import { typeDuration, typedCount } from './anim'
 
 export interface Prompt {
   plain?: string
@@ -18,6 +19,13 @@ export type ReadResult =
   | { type: 'closed' }
 
 type Mode = 'idle' | 'line' | 'secret' | 'stdin' | 'pager' | 'stage'
+
+interface MotionPlan {
+  typed: { node: Node; full: string }[]
+  fades: { el: HTMLElement; step: number }[]
+  cps: number
+  faded: number
+}
 
 /**
  * One pane.
@@ -44,6 +52,8 @@ export class TermView {
   private draft = ''
   private pagerLines: string[] = []
   private pagerTop = 0
+  /** Set while a typed reveal is running, so any key can end it. */
+  private animating: (() => void) | null = null
 
   constructor() {
     this.el = document.createElement('section')
@@ -203,18 +213,23 @@ export class TermView {
     return Math.max(40, Math.floor((width - 28) / 8.8))
   }
 
-  print(text: string, kind: 'out' | 'err' | 'dim' = 'out') {
+  async print(
+    text: string,
+    kind: 'out' | 'err' | 'dim' = 'out',
+    opts: { maxMs?: number } = {},
+  ): Promise<void> {
     if (!text) return
     let body = text
     if (body.length > 80_000) body = `${body.slice(0, 80_000)}\n...(truncated)\n`
+    if (body.endsWith('\n')) body = body.slice(0, -1)
     const stick = this.scroll.scrollHeight - this.scroll.scrollTop - this.scroll.clientHeight < 48
-    const parts = body.split('\n')
-    if (body.endsWith('\n')) parts.pop()
-    for (const part of parts) this.addLine(part, kind)
+    const plan = this.appendLines(parseLines(body), kind)
     if (stick) this.scroll.scrollTop = this.scroll.scrollHeight
+    await this.reveal(plan, opts.maxMs)
   }
 
   clear() {
+    this.animating?.()
     this.scroll.replaceChildren()
   }
 
@@ -311,6 +326,7 @@ export class TermView {
   }
 
   cancel() {
+    this.animating?.()
     this.mode = 'idle'
     this.resolve({ type: 'closed' })
     this.endPager()
@@ -478,15 +494,118 @@ export class TermView {
     )
   }
 
-  private addLine(text: string, kind: string) {
-    const line = document.createElement('div')
-    line.className = `ln ${kind}`
-    if (!text) line.append(document.createTextNode('\u00a0'))
-    else {
-      for (const part of parseAnsi(text)) line.append(renderPart(part))
+  private addLine(line: TextLine, kind: string, plan: MotionPlan): HTMLElement {
+    const el = document.createElement('div')
+    el.className = `ln ${kind}`
+    if (!line.spans.length) el.append(document.createTextNode('\u00a0'))
+    for (const part of line.spans) {
+      if (part.anim?.mode === 'type' && part.text) {
+        const node = renderPart({ ...part, text: '' })
+        el.append(node)
+        if (part.anim.rate < plan.cps) plan.cps = part.anim.rate
+        plan.typed.push({ node, full: part.text })
+        continue
+      }
+      if (part.anim?.mode === 'fade') {
+        el.classList.add('motion-fade')
+        plan.fades.push({ el, step: plan.faded++ * part.anim.rate })
+      }
+      el.append(renderPart(part))
     }
-    this.scroll.append(line)
+    this.scroll.append(el)
     while (this.scroll.childElementCount > 2000) this.scroll.firstElementChild?.remove()
+    return el
+  }
+
+  /** Build the lines now so the scroll height is final, then return what still has to be revealed. */
+  private appendLines(lines: TextLine[], kind: string): MotionPlan {
+    const plan: MotionPlan = { typed: [], fades: [], cps: Number.POSITIVE_INFINITY, faded: 0 }
+    for (const line of lines) this.addLine(line, kind, plan)
+    // The fades start after the last typed character, so the block reads in order.
+    const chars = plan.typed.reduce((sum, item) => sum + [...item.full].length, 0)
+    const cps = Number.isFinite(plan.cps) ? plan.cps : 90
+    const base = chars ? Math.min(MOTION_MS_MAX, (chars / cps) * 1000) : 0
+    for (const item of plan.fades) item.el.style.animationDelay = `${base + item.step}ms`
+    return plan
+  }
+
+  /**
+   * Reveal typed characters. Any key or click finishes it at once, and a hidden
+   * tab or a reader who asked for reduced motion sees the final text immediately.
+   */
+  private reveal(plan: MotionPlan, maxMs = MOTION_MS_MAX): Promise<void> {
+    if (!plan.typed.length) return Promise.resolve()
+    const showAll = () => {
+      for (const item of plan.typed) item.node.textContent = item.full
+    }
+    // A hidden tab and a reader who asked for reduced motion both get the final text at once.
+    if (this.reducedMotion() || document.visibilityState === 'hidden') {
+      showAll()
+      return Promise.resolve()
+    }
+    const total = plan.typed.reduce((sum, item) => sum + [...item.full].length, 0)
+    if (!total) {
+      showAll()
+      return Promise.resolve()
+    }
+    const cps = Number.isFinite(plan.cps) ? plan.cps : 90
+    const span = typeDuration(total, cps, maxMs)
+
+    return new Promise((resolve) => {
+      let raf = 0
+      let done = false
+      const started = performance.now()
+      const apply = (count: number) => {
+        let left = count
+        for (const item of plan.typed) {
+          const chars = [...item.full]
+          const visible = Math.max(0, Math.min(chars.length, left))
+          left -= chars.length
+          const next = chars.slice(0, visible).join('')
+          if (item.node.textContent !== next) item.node.textContent = next
+        }
+      }
+      const finish = () => {
+        if (done) return
+        done = true
+        cancelAnimationFrame(raf)
+        window.removeEventListener('keydown', onSkip, true)
+        this.el.removeEventListener('mousedown', onSkip, true)
+        if (this.animating === finish) this.animating = null
+        this.input.readOnly = !this.el.classList.contains('active')
+        apply(total)
+        resolve()
+      }
+      const onSkip = (event: Event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        finish()
+      }
+      this.animating = finish
+      this.input.readOnly = true
+      window.addEventListener('keydown', onSkip, true)
+      this.el.addEventListener('mousedown', onSkip, true)
+
+      const tick = () => {
+        if (done) return
+        const elapsed = performance.now() - started
+        if (elapsed >= span) {
+          finish()
+          return
+        }
+        apply(typedCount(elapsed, cps, total))
+        raf = requestAnimationFrame(tick)
+      }
+      raf = requestAnimationFrame(tick)
+    })
+  }
+
+  private reducedMotion(): boolean {
+    try {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    } catch {
+      return false
+    }
   }
 
   private appendPlain(parent: HTMLElement, text: string) {

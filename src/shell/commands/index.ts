@@ -66,7 +66,7 @@ const GUIDE = `home
 [1;36mTry to use 'cat /home/owner/about.txt' to read the about page.
 
 Click a path to open it: a directory lists, a .md renders, a .pdf opens, a text file prints.
-'index' prints the map again.[0m
+'index' prints the map again. Any key skips a playing animation.[0m
 
 Pages
   [1;33m/home/owner[0m                     about, projects, notes, resume
@@ -146,7 +146,14 @@ function metaCommands(all: CommandSpec[]): CommandSpec[] {
           if (!spec) return { code: 1, stderr: `help: ${name}: not found\n` }
           return { code: 0, stdout: `${spec.name} - ${spec.summary}\n  ${spec.usage}\n\n${spec.manual}\n` }
         }
-        const lines = [GUIDE.trimEnd(), '', 'Commands', '']
+        const quickStart = `\x1b[34mQuick Start
+- Type 'index' to see the map again. Every path is clickable.
+- Type 'ls' to see the files and folders in this path.
+- Type 'cat about.txt' to read the introduction to this page.
+- Type 'pdf me.pdf' to see my resume.
+- Type 'cd /home/owner/works/projects' to see all my projects.
+- Type 'help' for more information.\x1b[0m`
+        const lines = [quickStart, '', GUIDE.trimEnd(), '', 'Commands', '']
         for (const [group, label] of labels) {
           lines.push(label)
           for (const spec of all.filter((item) => item.group === group)) {

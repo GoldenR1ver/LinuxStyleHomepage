@@ -8,9 +8,4 @@ I was involved in the work on the paper "Preserving Topological Information for 
 
 I have independently completed several projects, including [1;33m"The Flow of Gifts: A Multi-Agent Sociological Simulation,"[0m the [1;33m"'Da Jian' Chinese Calligraphy Style Recognition System,"[0m and [1;33m"DoJot: A Mahjong AI for the Majsoul Web Client." [0mYou can search in path '/home/owner/works/' for more details.
 
-Quick Start
-- Type 'ls' to see the files and floders in this path.
-- Type 'cat about.txt' to introduction to this page.
-- Type 'pdf me.pdf' to see my resume.
-- Type 'cd /home/owner/works/projects' to see all my projects.
-- Type 'help' for more information.
+Type 'help' for the full guide.
