@@ -7,6 +7,14 @@ const REPO = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   base: './',
+  define: {
+    /**
+     * A fresh id per build. `dist/fs/manifest.json` keeps its name across
+     * deploys, so without this a browser with a cached manifest can pair it
+     * with a new bundle and read a file list that no longer matches the code.
+     */
+    __BUILD_ID__: JSON.stringify(Date.now().toString(36)),
+  },
   // The browser app lives in packages/web; content/, public/ and dist/ stay at the root.
   root: resolve(REPO, 'packages/web'),
   publicDir: resolve(REPO, 'public'),
