@@ -1,0 +1,11 @@
+{
+  "name": "@home/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Terminal, filesystem and command shell. No DOM, no browser API.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  }
+}

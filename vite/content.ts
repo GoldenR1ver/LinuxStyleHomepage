@@ -1,7 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Plugin } from 'vite'
-import { check as checkDrafts } from '../tools/gates/draftCheck.mjs'
 
 const TEXT = new Set(['.md', '.txt', '.log', '.json', '.csv', '.html', '.yml', '.yaml'])
 const INLINE_LIMIT = 500_000
@@ -9,34 +8,14 @@ const INLINE_LIMIT = 500_000
 /**
  * Treat content/ as the site's root filesystem.
  * Dev reads it from disk. The build emits dist/fs and manifest.json.
- * Nothing outside content/ is published: the architecture in intent/, spec/,
- * tests/ and uml/ stays in the repository.
- *
- * Drafts are refused before anything is emitted, in dev and in build alike.
- * The check is the same module the pre-commit gate runs, so the two agree.
+ * Nothing outside content/ is published, and the repository carries nothing
+ * else that is not needed to build and serve the site.
  */
 export function contentPlugin(dir = 'content'): Plugin {
   const root = path.resolve(dir)
   return {
     name: 'content-fs',
-    buildStart() {
-      const problems = checkDrafts(path.dirname(root))
-      if (!problems.length) return
-      this.error(
-        [
-          'G-DRAFT-01: content/ 里出现了草稿痕迹，构建已停止。',
-          ...problems.map((problem) => `  - ${problem}`),
-          '修法：把该文件移回 drafts/，或者确认要发布后删掉首行的 ' + '`DRAFT: unpublished`。',
-        ].join('\n'),
-      )
-    },
     configureServer(server) {
-      const problems = checkDrafts(path.dirname(root))
-      if (problems.length) {
-        server.config.logger.warn(
-          ['content/ 里出现了草稿痕迹，发布前必须处理：', ...problems.map((item) => `  - ${item}`)].join('\n'),
-        )
-      }
       server.middlewares.use((req, res, next) => {
         const url = req.url?.split('?')[0] ?? ''
         if (url === '/fs/manifest.json') {

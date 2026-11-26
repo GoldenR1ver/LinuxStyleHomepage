@@ -1,0 +1,13 @@
+{
+  "name": "@home/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The same core shell, run in a real terminal.",
+  "bin": {
+    "home": "./dist/cli.js"
+  },
+  "dependencies": {
+    "@home/core": "*"
+  }
+}

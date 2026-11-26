@@ -1,9 +1,15 @@
+# Dependencies and build output
 node_modules/
 dist/
-.DS_Store
-*.local
 .vite/
+*.local
 
-# Local drafts. Nothing here is committed or published: the build walks content/ only.
-drafts/*
-!drafts/README.txt
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Local architecture, kept out of the published project.
+# intent/, spec/, tests/, uml/ and tools/ are the workflow this repository is
+# developed with: they are versioned in a private copy, not here. A clone of this
+# repository contains the site and nothing else.
+/local/

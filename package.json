@@ -6,14 +6,18 @@
   "engines": {
     "node": ">=18"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "gate": "node tools/gates/run.mjs",
-    "check:logs": "node scripts/check-logs.mjs",
-    "typecheck": "tsc --noEmit"
+    "gate": "node local/tools/gates/run.mjs",
+    "typecheck": "tsc --noEmit",
+    "cli:build": "vite build --config packages/cli/vite.config.ts",
+    "cli": "npm run cli:build && node packages/cli/dist/cli.js"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

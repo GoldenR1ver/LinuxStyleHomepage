@@ -1,12 +1,32 @@
 import { defineConfig } from 'vite'
+import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 import { contentPlugin } from './vite/content'
+
+const REPO = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   base: './',
-  plugins: [contentPlugin()],
+  // The browser app lives in packages/web; content/, public/ and dist/ stay at the root.
+  root: resolve(REPO, 'packages/web'),
+  publicDir: resolve(REPO, 'public'),
+  resolve: {
+    alias: {
+      '@home/core': resolve(REPO, 'packages/core/src'),
+    },
+  },
+  plugins: [contentPlugin(resolve(REPO, 'content'))],
+  build: {
+    outDir: resolve(REPO, 'dist'),
+    emptyOutDir: true,
+  },
   test: {
-    // The gate and draft tests spawn node and git, so a loaded machine can take
-    // well over the 5 s default. The assertion is what must hold, not the clock.
+    // Tests live next to the code in both packages; the local architecture suite,
+    // when it is present, sits in local/tests and is not pushed.
+    root: REPO,
+    include: ['packages/**/*.test.ts', 'local/tests/**/*.test.ts'],
+    // The gate tests spawn node, so a loaded machine can take well over the 5 s
+    // default. The assertion is what must hold, not the clock.
     testTimeout: 20_000,
   },
 })

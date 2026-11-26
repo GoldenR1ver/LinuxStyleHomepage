@@ -1,0 +1,10 @@
+{
+  "name": "@home/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The browser terminal: DOM, styling and the IndexedDB adapter.",
+  "dependencies": {
+    "@home/core": "*"
+  }
+}
