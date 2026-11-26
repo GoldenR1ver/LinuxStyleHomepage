@@ -1,8 +1,7 @@
 import { stripLinks } from '@home/core/kernel/text'
 import { homeDir } from '@home/core/kernel/auth'
 import type { ShellCtx, PickOptions, PickedFile } from '@home/core/shell/context'
-import { MOTION_MS_MAX, parseLines, type Line as TextLine, type Span } from './ansi'
-import { typeDuration, typedCount } from './ansi'
+import { MOTION_MS_MAX, parseLines, revealDuration, revealSchedule, typedIndex, type Line as TextLine, type Span, type TypedRun } from './ansi'
 
 export interface Prompt {
   plain?: string
@@ -22,10 +21,15 @@ export type ReadResult =
 type Mode = 'idle' | 'line' | 'secret' | 'stdin' | 'pager' | 'stage'
 
 interface MotionPlan {
-  typed: { node: Node; full: string }[]
+  typed: { node: Node; full: string; cls: string }[]
   fades: { el: HTMLElement; step: number }[]
   cps: number
   faded: number
+}
+
+/** The typed spans as runs, so the cadence can see colors and paragraph breaks. */
+function runsOf(plan: MotionPlan): TypedRun[] {
+  return plan.typed.map((item) => ({ text: item.full, className: item.cls }))
 }
 
 /**
@@ -211,12 +215,26 @@ export class TermView {
 
   columns(): number {
     const width = this.scroll.clientWidth || this.el.clientWidth || 720
-    return Math.max(40, Math.floor((width - 28) / 8.8))
+    const style = getComputedStyle(this.scroll)
+    const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0)
+    const content = Math.max(0, width - pad)
+    return Math.max(40, Math.floor(content / this.charWidth()) - 1)
+  }
+
+  /** Width of one monospace cell in the terminal font. The CSS value is not assumed. */
+  private charWidth(): number {
+    const probe = document.createElement('span')
+    probe.textContent = '0'.repeat(20)
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;pointer-events:none'
+    this.scroll.append(probe)
+    const width = probe.getBoundingClientRect().width / 20
+    probe.remove()
+    return width > 0 ? width : 8.8
   }
 
   async print(
     text: string,
-    kind: 'out' | 'err' | 'dim' = 'out',
+    kind: string = 'out',
     opts: { maxMs?: number } = {},
   ): Promise<void> {
     if (!text) return
@@ -227,6 +245,19 @@ export class TermView {
     const plan = this.appendLines(parseLines(body), kind)
     if (stick) this.scroll.scrollTop = this.scroll.scrollHeight
     await this.reveal(plan, opts.maxMs)
+  }
+
+  /** Append a figure that holds one image, for the pre-login portrait. */
+  printImage(url: string, alt: string, instant = false): void {
+    const figure = document.createElement('figure')
+    figure.className = instant ? 'ln portrait portrait-instant' : 'ln portrait'
+    const img = document.createElement('img')
+    img.src = url
+    img.alt = alt
+    img.decoding = 'async'
+    figure.append(img)
+    this.scroll.append(figure)
+    this.scroll.scrollTop = this.scroll.scrollHeight
   }
 
   clear() {
@@ -504,7 +535,7 @@ export class TermView {
         const node = renderPart({ ...part, text: '' })
         el.append(node)
         if (part.anim.rate < plan.cps) plan.cps = part.anim.rate
-        plan.typed.push({ node, full: part.text })
+        plan.typed.push({ node, full: part.text, cls: part.className })
         continue
       }
       if (part.anim?.mode === 'fade') {
@@ -523,9 +554,8 @@ export class TermView {
     const plan: MotionPlan = { typed: [], fades: [], cps: Number.POSITIVE_INFINITY, faded: 0 }
     for (const line of lines) this.addLine(line, kind, plan)
     // The fades start after the last typed character, so the block reads in order.
-    const chars = plan.typed.reduce((sum, item) => sum + [...item.full].length, 0)
     const cps = Number.isFinite(plan.cps) ? plan.cps : 90
-    const base = chars ? Math.min(MOTION_MS_MAX, (chars / cps) * 1000) : 0
+    const base = revealDuration(runsOf(plan), cps)
     for (const item of plan.fades) item.el.style.animationDelay = `${base + item.step}ms`
     return plan
   }
@@ -550,7 +580,10 @@ export class TermView {
       return Promise.resolve()
     }
     const cps = Number.isFinite(plan.cps) ? plan.cps : 90
-    const span = typeDuration(total, cps, maxMs)
+    // Pauses are part of the cadence, so the block ends when the schedule ends.
+    const schedule = revealSchedule(runsOf(plan), cps, maxMs)
+    const times = schedule.times
+    const span = schedule.duration
 
     return new Promise((resolve) => {
       let raf = 0
@@ -594,7 +627,7 @@ export class TermView {
           finish()
           return
         }
-        apply(typedCount(elapsed, cps, total))
+        apply(typedIndex(times, elapsed))
         raf = requestAnimationFrame(tick)
       }
       raf = requestAnimationFrame(tick)
@@ -652,15 +685,16 @@ function text(value: string): Text {
   return document.createTextNode(value)
 }
 
-/** The prompt for one pane: the home directory shortens to ~. */
+/** The prompt for one pane: the home directory shortens to ~, and a narrow pane keeps the host short. */
 export function promptParts(ctx: ShellCtx): Prompt {
   const home = ctx.env.HOME || homeDir(ctx.user)
   let cwd = ctx.cwd
   if (cwd === home) cwd = '~'
   else if (home !== '/' && cwd.startsWith(`${home}/`)) cwd = `~${cwd.slice(home.length)}`
+  const host = ctx.env.HOSTNAME || 'home'
   return {
     user: ctx.user.name,
-    host: ctx.env.HOSTNAME || 'home',
+    host: ctx.columns && ctx.columns < 52 ? 'home' : host,
     cwd,
     sig: ctx.user.role === 'root' ? '#' : '$',
     root: ctx.user.role === 'root',

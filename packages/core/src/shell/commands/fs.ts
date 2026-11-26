@@ -8,11 +8,53 @@ import type { ShellCtx } from '../context'
 import { matchGlob } from '../glob'
 import type { PickedFile } from '../context'
 import type { CommandSpec } from './types'
-import { errorMessage, flags, joinPath, linkPath, resolvePath, splitLines, writeFile } from './helpers'
+import { errorMessage, flags, joinPath, link, linkPath, openCommand, resolvePath, splitLines, writeFile } from './helpers'
 
 const RESET = '\x1b[0m'
 const BLUE = '\x1b[34m'
-const GREEN = '\x1b[32m'
+/**
+ * Executables are marked by weight, not by slot 32: the palette's green is a
+ * highlight colour and would vanish as text on the white page.
+ */
+const BOLD = '\x1b[1m'
+/** cat prints these as a page; everything else keeps the terminal's monospace grid. */
+const PROSE_FILE = /\.(md|txt)$/i
+
+/*
+ * One glyph per format, for `ls`. Every value is a single code point inside the
+ * emoji block, so displayWidth counts it as two cells and the columns stay even.
+ * A name with no extension, or an extension not listed here, gets ICON_FILE.
+ */
+const ICON_FILE = '📄'
+const ICON_DIR = '📁'
+const ICON_EXEC = '🔧'
+const ICON: Record<string, string> = {
+  md: '📝',
+  txt: '📄',
+  log: '🧾',
+  pdf: '📕',
+  json: '🧩',
+  csv: '📊',
+  yml: '🧰',
+  yaml: '🧰',
+  html: '🌐',
+  pptx: '🎬',
+  png: '📷',
+  jpg: '📷',
+  jpeg: '📷',
+  gif: '📷',
+  webp: '📷',
+  zip: '📦',
+  gz: '📦',
+}
+
+function iconFor(name: string, stat: Stat): string {
+  if (stat.type === 'dir') return ICON_DIR
+  if (executable(stat.mode)) return ICON_EXEC
+  const cut = name.lastIndexOf('.')
+  const ext = cut < 0 ? '' : name.slice(cut + 1).toLowerCase()
+  return ICON[ext] ?? ICON_FILE
+}
 
 export const fileCommands: CommandSpec[] = [
   {
@@ -46,25 +88,29 @@ export const fileCommands: CommandSpec[] = [
     name: 'ls',
     group: 'file',
     summary: 'list directory',
-    usage: 'ls [-la] [path...]',
-    manual: 'List files. -l is long format, -a shows dotfiles. .gitkeep stays hidden.',
+    usage: 'ls [-lan] [path...]',
+    manual:
+      'List files. -l is long format, -a shows dotfiles, -n prints names without the format glyph. .gitkeep stays hidden.',
     run(ctx, args) {
-      const { set, rest } = flags(args, 'la')
+      const { set, rest } = flags(args, 'lan')
+      const icons = !set.has('n')
       const targets = rest.length ? rest : ['.']
       const blocks: string[] = []
       for (const target of targets) {
         const path = resolvePath(ctx, target)
         const stat = ctx.rt.fs.stat(ctx.user, path)
         if (stat.type === 'file') {
-          blocks.push(set.has('l') ? longEntry(ctx, path, basename(path)) : paint(ctx, path, basename(path)))
+          blocks.push(
+            set.has('l') ? longEntry(ctx, path, basename(path), icons) : paint(ctx, path, basename(path), icons),
+          )
           continue
         }
         const names = ctx.rt.fs
           .readdir(ctx.user, path)
           .filter((name) => set.has('a') || !name.startsWith('.'))
         if (targets.length > 1) blocks.push(`${target}:`)
-        if (set.has('l')) blocks.push(names.map((name) => longEntry(ctx, joinPath(path, name), name)).join('\n'))
-        else blocks.push(columnize(names.map((name) => paint(ctx, joinPath(path, name), name)), ctx.columns))
+        if (set.has('l')) blocks.push(names.map((name) => longEntry(ctx, joinPath(path, name), name, icons)).join('\n'))
+        else blocks.push(columnize(names.map((name) => paint(ctx, joinPath(path, name), name, icons)), ctx.columns))
       }
       const text = blocks.filter((block) => block !== '').join('\n')
       return { code: 0, stdout: text ? `${text}\n` : '' }
@@ -77,9 +123,11 @@ export const fileCommands: CommandSpec[] = [
     usage: 'tree [-aACdDfFgilnNpqst] [-L n] [-P pat] [path]',
     manual: [
       'List directories as a tree. The default depth is 3. The default drawing is ASCII.',
+      'Every name is a link: clicking it opens the file or lists the directory.',
       '-a  include names that start with a dot. .gitkeep stays hidden.',
       '-A  draw with ANSI line characters instead of ASCII.',
-      '-C  color directories and executable files. -n turns color off. The later flag wins.',
+      '-C  colour directories and executable files, and put a format glyph before each name. On by default.',
+      '-n  print plain names: no colour, no glyph.',
       '-d  list directories only.',
       '-D  print the modification time.',
       '-f  print the path from the argument, not only the name.',
@@ -190,7 +238,8 @@ export const fileCommands: CommandSpec[] = [
           code = 1
         }
       }
-      return { code, stdout, stderr }
+      const prose = rest.every((file) => PROSE_FILE.test(file)) && stdout.length > 0
+      return { code, stdout, stderr, ...(prose ? { prose: true } : {}) }
     },
   },
   {
@@ -385,17 +434,20 @@ export const fileCommands: CommandSpec[] = [
   },
 ]
 
-function longEntry(ctx: ShellCtx, path: string, name: string): string {
+function longEntry(ctx: ShellCtx, path: string, name: string, icons = true): string {
   const stat = ctx.rt.fs.stat(ctx.user, path)
   const mode = formatMode(stat.type, stat.mode)
   const size = String(stat.size).padStart(6, ' ')
-  return `${mode} 1 ${stat.uid} ${stat.gid} ${size} ${formatTime(stat.mtime)} ${paint(ctx, path, name)}`
+  return `${mode} 1 ${stat.uid} ${stat.gid} ${size} ${formatTime(stat.mtime)} ${paint(ctx, path, name, icons)}`
 }
 
-function paint(ctx: ShellCtx, path: string, name: string): string {
+function paint(ctx: ShellCtx, path: string, name: string, icons = true): string {
   let text = name
   try {
-    if (ctx.rt.fs.stat(ctx.user, path).type === 'dir') text = `${BLUE}${name}${RESET}`
+    const stat = ctx.rt.fs.stat(ctx.user, path)
+    if (stat.type === 'dir') text = `${BLUE}${name}${RESET}`
+    // The glyph sits outside the colour escape: an emoji brings its own colour.
+    if (icons) text = `${iconFor(name, stat)} ${text}`
   } catch {
     return name
   }
@@ -444,7 +496,7 @@ function treeDefaults(): TreeOpts {
   return {
     all: false,
     ansi: false,
-    color: false,
+    color: true,
     dirs: false,
     times: false,
     full: false,
@@ -513,7 +565,7 @@ function renderTree(ctx: ShellCtx, opts: TreeOpts, rootArg: string): string[] {
   const lines: string[] = []
   const abs = resolvePath(ctx, rootArg)
   const stat = ctx.rt.fs.stat(ctx.user, abs)
-  lines.push(treeLabel(opts, stat, rootArg))
+  lines.push(treeLabel(opts, abs, stat, rootArg))
   if (stat.type === 'dir') fillTree(ctx, opts, abs, rootArg, '', opts.depth, lines)
   return lines
 }
@@ -554,7 +606,7 @@ function fillTree(
       lines.push(`${prefix}${graphics.branch(last)}${renderControls(childDisplay, opts.names)}`)
       return
     }
-    lines.push(`${prefix}${graphics.branch(last)}${treeLabel(opts, stat, childDisplay)}`)
+    lines.push(`${prefix}${graphics.branch(last)}${treeLabel(opts, childAbs, stat, childDisplay)}`)
     if (stat.type === 'dir') {
       fillTree(ctx, opts, childAbs, childDisplay, `${prefix}${graphics.pad(last)}`, depth - 1, lines)
     }
@@ -610,18 +662,27 @@ function orderTree(ctx: ShellCtx, opts: TreeOpts, dir: string, names: string[]):
   return [...names].sort((a, b) => stamp(b) - stamp(a) || a.localeCompare(b, 'zh-CN'))
 }
 
-function treeLabel(opts: TreeOpts, stat: Stat, display: string): string {
+/**
+ * One tree line. The name is always a link, so a click opens it: `ls` for a
+ * directory, `md`/`pdf`/`cat`/`wget` for a file. The link is an OSC 8 target,
+ * so a pipe, a redirect and the real terminal see the plain name.
+ */
+function treeLabel(opts: TreeOpts, abs: string, stat: Stat, display: string): string {
   const parts: string[] = []
   if (opts.perms) parts.push(`[${formatMode(stat.type, stat.mode)}]`)
   if (opts.size) parts.push(`[${stat.size}]`)
   if (opts.group) parts.push(`[${stat.gid}]`)
   if (opts.times) parts.push(`[${formatTime(stat.mtime)}]`)
   let name = renderControls(display, opts.names)
-  if (opts.color) {
-    const color = stat.type === 'dir' ? BLUE : executable(stat.mode) ? GREEN : ''
-    if (color) name = `${color}${name}${RESET}`
-  }
   if (opts.classify) name += stat.type === 'dir' ? '/' : executable(stat.mode) ? '*' : ''
+  if (opts.color) {
+    const color = stat.type === 'dir' ? BLUE : executable(stat.mode) ? BOLD : ''
+    if (color) name = `${color}${name}${RESET}`
+    // The glyph sits outside the colour escape, as in ls, so it keeps its own ink.
+    name = `${iconFor(display, stat)} ${name}`
+  }
+  const command = openCommand(abs, stat.type === 'dir' ? 'dir' : 'file', stat.encoding === 'binary')
+  if (command) name = link(name, command)
   parts.push(name)
   return parts.join(' ')
 }

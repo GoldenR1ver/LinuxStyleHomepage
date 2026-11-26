@@ -41,6 +41,8 @@ export interface CommandResult {
   code: number
   stdout?: string
   stderr?: string
+  /** stdout is a page to read; a host may set it in a proportional face. */
+  prose?: boolean
   clear?: boolean
   logout?: boolean
   exitPane?: boolean

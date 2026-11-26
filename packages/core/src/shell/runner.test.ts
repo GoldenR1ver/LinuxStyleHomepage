@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { runLine } from './runner'
 import { boot } from '../testkit'
+import { stripLinks } from '../kernel/text'
 import { MAX_UPLOAD_BYTES } from '../kernel/types'
 import { FsError } from '../kernel/vfs'
 
@@ -459,6 +460,42 @@ describe('shell', () => {
     expect(listed.stdout).toContain('\x1b]8;;cmd:')
   })
 
+  it('marks each name with a glyph for its format, and ls -n leaves it out', async () => {
+    const { ctx } = boot()
+    const listed = (await runLine('ls /home/owner', ctx)).stdout ?? ''
+    expect(listed).toContain('📝 about.md')
+    // A directory name keeps its colour, so the glyph and the name are split by escapes.
+    expect(listed).toContain(`📁 ${'\x1b'}[34mnotes`)
+
+    const long = (await runLine('ls -l /home/owner', ctx)).stdout ?? ''
+    expect(long).toContain('📝 about.md')
+
+    const plain = (await runLine('ls -n /home/owner', ctx)).stdout ?? ''
+    expect(plain).not.toContain('📝')
+    expect(plain).toContain('about.md')
+
+    // An unknown extension still gets a glyph, so every column starts at the same cell.
+    await runLine('echo x > /tmp/ada/page.log', ctx)
+    const mixed = (await runLine('ls /tmp/ada', ctx)).stdout ?? ''
+    expect(mixed).toContain('🧾 page.log')
+  })
+
+  it('links every line of a tree, and keeps the link out of a pipe and a file', async () => {
+    const { ctx, fs } = boot()
+    const tree = (await runLine('tree -L 1', ctx)).stdout ?? ''
+    expect(tree).toContain('\x1b]8;;cmd:')
+    // A directory opens as a listing, a markdown page in the reader, a plain file with cat.
+    expect(tree).toContain(encodeURIComponent('ls /home/owner/notes'))
+    expect(tree).toContain(encodeURIComponent('md /home/owner/about.md'))
+
+    const piped = (await runLine('tree -L 1 | wc -l', ctx)).stdout ?? ''
+    expect(piped).not.toContain('\x1b]8;;')
+    expect(piped.trim()).toBe('3')
+
+    expect((await runLine('tree -L 1 > /tmp/ada/t.txt', ctx)).code).toBe(0)
+    expect(fs.read(ctx.user, '/tmp/ada/t.txt').content).not.toContain('\x1b]8;;')
+  })
+
   it('never trusts a link that came from a file', async () => {    const { ctx } = boot()
     const forged = `\x1b]8;;cmd:rm -rf /home/owner\x1b\\click me\x1b]8;;\x1b\\`
     expect((await runLine(`echo '${forged}' > /tmp/ada/evil.txt`, ctx)).code).toBe(0)
@@ -474,6 +511,15 @@ describe('shell', () => {
     const printed = (await runLine('cat /tmp/ada/slow.txt', ctx)).stdout ?? ''
     expect(printed).toContain('slow')
     expect(printed).not.toContain('5522')
+  })
+
+  it('marks a page printed by cat as prose, and leaves listings monospace', async () => {
+    const { ctx } = boot()
+    expect((await runLine('cat /home/owner/about.md', ctx)).prose).toBe(true)
+    await runLine('echo page > /tmp/ada/page.txt', ctx)
+    expect((await runLine('cat /tmp/ada/page.txt', ctx)).prose).toBe(true)
+    expect((await runLine('cat /home/owner/about.md /etc/hostname', ctx)).prose).toBeUndefined()
+    expect((await runLine('ls /home/owner', ctx)).prose).toBeUndefined()
   })
 
   it('prints the front page at once, without a typing region', async () => {
@@ -537,23 +583,28 @@ describe('shell', () => {
     expect(owned.fs.stat(root, '/home/owner/about.md').gid).toBe('readers')
 
     const { ctx, fs } = boot()
-    const plain = await runLine('tree -L 1', ctx)
-    expect(plain.stdout).toBe('.\n|-- about.md\n`-- notes\n')
-    const ansi = await runLine('tree -A -L 1', ctx)
-    expect(ansi.stdout).toContain('├── about.md')
-    expect(ansi.stdout).toContain('└── notes')
+    // Colour and glyphs are the default; -n is the plain form (names still link).
+    const plain = await runLine('tree -n -L 1', ctx)
+    expect(stripLinks(plain.stdout ?? '')).toBe('.\n|-- about.md\n`-- notes\n')
+    const ansi = await runLine('tree -A -n -L 1', ctx)
+    expect(stripLinks(ansi.stdout ?? '')).toContain('├── about.md')
+    expect(stripLinks(ansi.stdout ?? '')).toContain('└── notes')
     const dirs = await runLine('tree -d', ctx)
     expect(dirs.stdout).not.toContain('about.md')
     expect(dirs.stdout).toContain('notes')
     const perm = await runLine('tree -p -L 1', ctx)
-    expect(perm.stdout).toContain('[drwxr-xr-x] notes')
-    expect(perm.stdout).toContain('[-rw-r--r--] about.md')
+    expect(stripLinks(perm.stdout ?? '')).toContain('[drwxr-xr-x] 📁 ')
+    expect(stripLinks(perm.stdout ?? '')).toContain('[-rw-r--r--] 📝 about.md')
     const flat = await runLine('tree -f -i -L 1', ctx)
     expect(flat.stdout).toContain('./about.md')
     expect(flat.stdout).not.toContain('|--')
-    expect((await runLine('tree -C -L 1 -d', ctx)).stdout).toContain('\x1b[34m')
-    expect((await runLine('tree -C -n -L 1 -d', ctx)).stdout).not.toContain('\x1b[')
-    expect((await runLine('tree -l -L 0', ctx)).stdout).toBe('.\n')
+    const colored = (await runLine('tree -L 1 -d', ctx)).stdout ?? ''
+    expect(colored).toContain('\x1b[34m')
+    expect(colored).toContain('📁')
+    const off = (await runLine('tree -n -L 1 -d', ctx)).stdout ?? ''
+    expect(off).not.toContain('\x1b[')
+    expect(off).not.toContain('📁')
+    expect(stripLinks((await runLine('tree -n -l -L 0', ctx)).stdout ?? '')).toBe('.\n')
     expect((await runLine('tree -z', ctx)).code).toBe(1)
 
     fs.begin()

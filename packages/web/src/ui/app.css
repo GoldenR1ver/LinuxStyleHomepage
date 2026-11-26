@@ -1,16 +1,63 @@
+/* Roboto, Apache License 2.0, https://fonts.google.com/specimen/Roboto */
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../assets/fonts/roboto-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
 :root {
-  color-scheme: dark;
-  --bg: #101010;
-  --fg: #d7d7d7;
-  --dim: #8d8d8d;
-  --green: #98c379;
-  --blue: #61afef;
-  --red: #e06c75;
-  --line: #2a2a2a;
-  --active: #7dba6a;
-  --status: #161616;
-  font-family: "Cascadia Mono", "Cascadia Code", "Sarasa Mono SC", "Noto Sans Mono CJK SC",
-    "Source Han Mono", "IBM Plex Mono", Consolas, "Liberation Mono", ui-monospace, monospace;
+  color-scheme: light;
+  /* Swiss International Style: paper, ink, one signal, one link blue, one block. */
+  --bg: #ffffff;
+  --fg: #000000;
+  --ink-soft: #555555;
+  --dim: #6b7280;
+  --rule: #d4d4d4;
+  --line: var(--rule);
+  --surface: #f0f0f0;
+  --status: #ffffff;
+  --active: var(--accent);
+  --link: #0057b8;
+  --block: #ffcc00;
+  /*
+   * One hue in two registers. A FILL is the owner's saturated ANSI value and is
+   * only ever a ground, a mark or a rule. An INK is the same hue darkened until
+   * it reads on paper (>= 4.5:1 on white) and is the only thing text may use.
+   */
+  --fill-red: #dc143c;
+  --fill-green: #00ff99;
+  --fill-yellow: #ffcc00;
+  --fill-orange: #ff8800;
+  --fill-cyan: #00ffee;
+  --fill-purple: #ff00cc;
+  --ink-red: #dc143c;
+  --ink-green: #007a4d;
+  --ink-yellow: #e4af00;
+  --ink-orange: #b34700;
+  --ink-cyan: #00696e;
+  --ink-purple: #c0008f;
+  --ink-brown: #6c3b00;
+  --accent: #dc143c;
+  --font-display: "Times New Roman", Times, "Liberation Serif", "Noto Serif SC",
+    "Songti SC", serif;
+  --font-body: Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "Microsoft YaHei",
+    sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC",
+    "Source Han Mono", "IBM Plex Mono", Menlo, "Liberation Mono", ui-monospace, monospace;
+  /* Where the reading column starts. Output, commands and the live prompt share it. */
+  --col-inset: max(14px, calc((100% - 760px) / 2));
+  /* The landing portrait. One number to change its size against the type. */
+  --portrait-w: 196px;
+  /* The rule a command carries, and the inset its text sits at beyond that rule. */
+  --rule-w: 2px;
+  --rule-gap: 12px;
+  --cmd-gap: 20px;
+  font-family: var(--font-mono);
   font-size: 16px;
   line-height: 1.45;
 }
@@ -70,11 +117,13 @@ body { overflow: hidden; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 0;
   background: var(--bg);
 }
 
-.pane.active { border-color: var(--active); }
+/* A single pane is a page, not a box. A split keeps a hairline between panes. */
+.split .pane { border: 1px solid var(--line); }
+.split .pane.active { border-color: var(--active); }
 
 .scroll-wrap {
   position: relative;
@@ -83,11 +132,12 @@ body { overflow: hidden; }
   display: flex;
 }
 
+/* The reading column. 760px is the terminal's Typora-like line length. */
 .scroll, .pager {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px 14px 4px;
+  padding: 12px var(--col-inset) 4px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -98,10 +148,37 @@ body { overflow: hidden; }
   background: var(--bg);
 }
 
+/*
+ * A command is structure, an echo is content.
+ * The line you typed is bold and carries a 2px rule; what it printed carries
+ * neither. The gap above the rule is the distance between two commands, and the
+ * small gap below it keeps the echo from touching its own command.
+ */
+.entered {
+  margin: var(--cmd-gap) 0 6px;
+  padding: 2px 0 2px var(--rule-gap);
+  border-left: var(--rule-w) solid var(--fg);
+  font-weight: 700;
+}
+
+/* The live prompt is the same row before it is committed, so nothing jumps on Enter. */
 .row {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  padding: 0 14px 12px;
+  margin-top: var(--cmd-gap);
+  padding: 2px var(--col-inset) 12px calc(var(--col-inset) + var(--rule-w) + var(--rule-gap));
+  font-weight: 700;
+}
+
+.row::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 12px;
+  left: var(--col-inset);
+  width: var(--rule-w);
+  background: var(--fg);
 }
 
 .prompt {
@@ -109,9 +186,10 @@ body { overflow: hidden; }
   flex: none;
 }
 
-.user { color: var(--green); }
-.user.root { color: var(--red); }
-.cwd { color: var(--blue); }
+.user { color: var(--fg); }
+/* Root is the one place the signal colour is allowed in the prompt. */
+.user.root { color: var(--accent); }
+.cwd { color: var(--fg); }
 
 .cmd {
   flex: 1;
@@ -125,22 +203,95 @@ body { overflow: hidden; }
   color: inherit;
   font: inherit;
   line-height: inherit;
-  caret-color: #f2f2f2;
+  caret-color: var(--fg);
 }
 
 .cmd:focus { outline: none; }
 .cmd.secret { -webkit-text-security: disc; }
 
-.ln.err { color: var(--red); }
+.ln.err { color: var(--ink-red); }
 .ln.dim, .dim { color: var(--dim); }
+
 .ln-link {
-  color: var(--blue);
-  text-decoration: none;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
   cursor: pointer;
-  border-bottom: 1px dotted color-mix(in srgb, currentColor 55%, transparent);
 }
-.ln-link:hover { border-bottom-style: solid; }
-.ln-link:focus-visible { outline: 1px solid var(--blue); outline-offset: 1px; }
+/* Hover activates the structural line, the way a Swiss index row does. */
+.ln-link:hover { text-decoration-color: var(--accent); }
+.ln-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/*
+ * Plan B: the portrait floats right and the headline and prose wrap beside it.
+ * No frame: the plate is a hard-edged crop, and the type supplies the edge.
+ */
+.ln.portrait {
+  float: right;
+  width: var(--portrait-w);
+  margin: 0 0 24px 44px;
+  line-height: 0;
+  max-width: none;
+}
+
+.ln.portrait img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  filter: contrast(1.06);
+  animation: portrait-in 700ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.ln.portrait.portrait-instant img { animation: none; }
+
+@keyframes portrait-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ln.portrait img { animation: none; }
+}
+
+/* The pre-login hero and its introduction. Line kinds come from TermView.print(). */
+.ln.hero {
+  font-family: var(--font-display);
+  font-size: clamp(52px, 8vw, 88px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  padding: clamp(24px, 8vh, 96px) 0 0.1em;
+}
+
+/* Beside a floating plate the headline starts at the top, so the two share a line. */
+.ln.hero.beside {
+  padding-top: clamp(4px, 1.2vh, 18px);
+}
+
+.ln.intro {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.85;
+  color: var(--ink-soft);
+  max-width: 62ch;
+}
+
+/* Beside the plate the prose fills the column; the float is what shortens a line. */
+.ln.intro.beside {
+  max-width: none;
+}
+
+/* A file printed by cat: a page, not a grid. Lists and trees stay monospace. */
+.ln.prose {
+  font-family: var(--font-body);
+  font-size: 16.5px;
+  line-height: 1.75;
+  color: var(--fg);
+  max-width: 72ch;
+}
 
 .motion-fade {
   animation: ln-in 240ms ease-out both;
@@ -155,16 +306,35 @@ body { overflow: hidden; }
   .motion-fade { animation: none; }
 }
 .bold { font-weight: 700; }
-.fg-red { color: #e06c75; }
-.fg-green { color: #98c379; }
-.fg-yellow { color: #e5c07b; }
-.fg-blue { color: #61afef; }
-.fg-magenta { color: #c678dd; }
-.fg-cyan { color: #56b6c2; }
-.fg-white { color: #dcdfe4; }
+
+/*
+ * Grounds (SGR 40-47, 100-107) come first and the inks after, so an explicit
+ * foreground always wins when both are set on one run. A ground on its own
+ * picks the ink that reads on it, the way a colour field does in print.
+ * Values below are the owner's ANSI palette, not the Swiss three-colour set.
+ */
+.bg-black { background: #000000; color: #ffffff; }                      /* 40 */
+.bg-red { background: var(--fill-red); color: #ffffff; }                 /* 41 crimson */
+.bg-green { background: var(--fill-green); color: #000000; }             /* 42 */
+.bg-yellow { background: var(--fill-yellow); color: #000000; }           /* 43 */
+.bg-blue { background: var(--link); color: #ffffff; }                    /* 44 */
+.bg-magenta { background: var(--fill-purple); color: #000000; }          /* 45 purple */
+.bg-cyan { background: var(--fill-cyan); color: #000000; }               /* 46 */
+.bg-white { background: #ffffff; color: #000000; box-shadow: inset 0 0 0 1px var(--rule); } /* 47 */
+
+.fg-black { color: #000000; }                                            /* 30 */
+.fg-red { color: var(--ink-red); }                                       /* 31 */
+.fg-green { color: var(--ink-green); }                                   /* 32 */
+.fg-yellow { color: var(--ink-yellow); }                                 /* 33 */
+.fg-blue { color: var(--link); }                                         /* 34 */
+.fg-magenta { color: var(--ink-orange); }                                /* 35 orange */
+.fg-cyan { color: var(--ink-cyan); }                                     /* 36 */
+.fg-white { color: #000000; }                                            /* 37 */
+.fg-purple { color: var(--ink-purple); }                                 /* 38 */
+.fg-brown { color: var(--ink-brown); }                                   /* 39 */
 
 .status {
-  height: 30px;
+  height: 28px;
   flex: none;
   display: flex;
   align-items: center;
@@ -173,8 +343,11 @@ body { overflow: hidden; }
   padding: 0 10px;
   background: var(--status);
   color: var(--dim);
-  font-size: 13px;
-  border-top: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-top: 1px solid var(--fg);
 }
 
 .status-left, .status-right {
@@ -187,7 +360,7 @@ body { overflow: hidden; }
 .status-left { overflow: hidden; }
 .status-right { flex: none; }
 
-.session { color: var(--green); margin-right: 4px; }
+.session { color: var(--fg); margin-right: 4px; }
 
 .win, .touch {
   border: 0;
@@ -198,15 +371,17 @@ body { overflow: hidden; }
   cursor: pointer;
 }
 
-.win.on { color: var(--fg); background: #2c2c2c; }
+.win.on { color: var(--fg); background: var(--surface); }
 .touch { display: none; }
 
 @media (pointer: coarse) {
   .touch { display: inline-flex; }
 }
 
-::selection { background: #264f78; }
+/* A marker, not a tint: the yellow field with black ink. */
+::selection { background: var(--block); color: #000000; }
 
+.status[hidden],
 .row[hidden],
 .stage[hidden],
 .pager[hidden] {
@@ -241,14 +416,14 @@ body { overflow: hidden; }
 
 .vim-line { min-height: 1.45em; }
 
-.vim-gutter { color: var(--dim); }
+.vim-gutter { color: var(--rule); }
 
 .vim-cursor {
-  background: #d7d7d7;
-  color: #101010;
+  background: var(--fg);
+  color: var(--bg);
 }
 
-.vim-visual { background: #264f78; }
+.vim-visual { background: var(--block); color: #000000; }
 
 .vim-status, .vim-prompt {
   flex: none;
@@ -256,7 +431,7 @@ body { overflow: hidden; }
   padding: 0 10px;
 }
 
-.vim-status { background: #1c1c1c; }
+.vim-status { background: var(--surface); }
 
 .vim-ime {
   position: absolute;
@@ -279,7 +454,7 @@ body { overflow: hidden; }
   gap: 12px;
   height: 32px;
   padding: 0 10px;
-  background: var(--status);
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
@@ -316,44 +491,85 @@ body { overflow: hidden; }
 }
 
 .stage-doc {
-  max-width: 72ch;
+  max-width: 720px;
   margin: 0 auto;
-  padding: 28px 22px 48px;
-  font-family: "Segoe UI", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", sans-serif;
+  padding: 48px 24px 72px;
+  font-family: var(--font-body);
   font-size: 17px;
-  line-height: 1.65;
+  line-height: 1.75;
+  color: var(--fg);
 }
 
 .stage-doc h1, .stage-doc h2, .stage-doc h3, .stage-doc h4 {
-  line-height: 1.3;
-  margin: 1.4em 0 0.4em;
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.2;
+  margin: 1.6em 0 0.5em;
 }
 
-.stage-doc h1 { font-size: 1.8em; }
-.stage-doc h2 { font-size: 1.4em; }
-.stage-doc p, .stage-doc ul, .stage-doc ol, .stage-doc blockquote, .stage-doc table { margin: 0.7em 0; }
-.stage-doc a { color: var(--blue); }
-.stage-doc a:hover { text-decoration: underline; }
+.stage-doc h1 { font-size: 2.2em; }
+.stage-doc h2 { font-size: 1.6em; }
+.stage-doc h3 { font-size: 1.25em; }
+.stage-doc p, .stage-doc ul, .stage-doc ol, .stage-doc blockquote, .stage-doc table { margin: 0.8em 0; }
+.stage-doc a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+}
+.stage-doc a:hover { text-decoration-color: var(--accent); }
 .stage-doc code {
-  font-family: ui-monospace, monospace;
-  background: #1c1c1c;
-  padding: 0 0.25em;
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--surface);
+  padding: 0.1em 0.3em;
 }
 .stage-doc pre {
   overflow: auto;
-  padding: 12px;
-  background: #1c1c1c;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
 .stage-doc pre code { padding: 0; background: transparent; }
 .stage-doc blockquote {
   margin-left: 0;
-  padding-left: 12px;
-  border-left: 3px solid var(--line);
+  padding-left: 14px;
+  border-left: 2px solid var(--accent);
   color: var(--dim);
 }
 .stage-doc table { border-collapse: collapse; }
 .stage-doc th, .stage-doc td {
   border: 1px solid var(--line);
-  padding: 4px 8px;
+  padding: 6px 10px;
   text-align: left;
+}
+
+@media (max-width: 520px) {
+  .clock { display: none; }
+}
+
+@media (max-width: 560px) {
+  /* A narrower plate, so the type beside it still reads as a column. */
+  .ln.portrait {
+    width: 108px;
+    margin: 0 0 12px 18px;
+  }
+}
+
+@media (max-width: 420px) {
+  :root { font-size: 15px; }
+  .row { font-size: 13px; }
+  .ln.hero { font-size: 44px; }
+  .ln.portrait {
+    width: 92px;
+    margin: 0 0 10px 14px;
+  }
+  .ln.intro { font-size: 16px; }
+  .ln.prose { font-size: 16px; }
+}
+
+@media (max-width: 360px) {
+  .ln.hero { font-size: 40px; }
+  .ln.intro { font-size: 15px; }
+  .ln.prose { font-size: 15.5px; }
 }

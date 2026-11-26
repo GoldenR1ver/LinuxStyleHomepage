@@ -1,0 +1,6 @@
+# content/etc/portrait
+# The first line that is not a comment is a path in content/.
+# An empty file, a blank path, or "none" hides the portrait.
+# Put # before a path to switch pictures without deleting it.
+/home/owner/notes/humanities/me.jpg
+Yujiang Adam Li

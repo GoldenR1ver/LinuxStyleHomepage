@@ -54,6 +54,7 @@ async function runList(items: ListItem[], ctx: ShellCtx, depth: number, budget: 
   let exitPane = false
   let pager: string | undefined
   let stage: CommandResult['stage']
+  let prose = false
   const downloads: NonNullable<CommandResult['downloads']> = []
   let first = true
 
@@ -72,6 +73,7 @@ async function runList(items: ListItem[], ctx: ShellCtx, depth: number, budget: 
     if (result.pager !== undefined) pager = result.pager
     if (result.stage) stage = result.stage
     if (result.downloads) downloads.push(...result.downloads)
+    prose = Boolean(result.prose)
     if (logout || exitPane) break
   }
 
@@ -79,6 +81,7 @@ async function runList(items: ListItem[], ctx: ShellCtx, depth: number, budget: 
     code,
     stdout,
     stderr,
+    prose: prose || undefined,
     clear,
     logout,
     exitPane,

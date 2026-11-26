@@ -7,12 +7,14 @@ import { publicHome } from '@home/core/config/site'
 import { Mux, type Layout, type Pane } from '@home/core/mux/mux'
 import { lookup } from '@home/core/shell/commands'
 import { link } from '@home/core/shell/commands/helpers'
-import { readIssue } from './issue'
-import { typeBlock } from './ansi'
+import { INTRO_MS_MAX, typeBlock } from './ansi'
+import { readLanding } from './landing'
 import { shellLoop } from './loop'
 import { TermView } from './term'
 
 const PREFIX_HELP = 'type help\n'
+/** A path in content/ is read by root, the same identity the build uses. */
+const ROOT_USER: User = { name: 'root', role: 'root' }
 
 export function startApp(rt: Runtime, warning = '') {
   const root = document.querySelector('#app')
@@ -29,6 +31,7 @@ export function startApp(rt: Runtime, warning = '') {
   const splitH = touchButton('side', () => current?.split('h'))
   const splitV = touchButton('stack', () => current?.split('v'))
   const clock = document.createElement('span')
+  clock.className = 'clock'
   statusRight.append(splitH, splitV, clock)
   status.append(statusLeft, statusRight)
   root.append(layout, status)
@@ -116,7 +119,6 @@ export function startApp(rt: Runtime, warning = '') {
     }
     void shellLoop(view, pane.ctx, {
       intro: introText,
-      boot: 'index',
       onPrompt: () => renderStatus(),
       onCommand: (line, code) => noteVisit(pane.ctx.user.name, pane.ctx.user.role, line, code),
     }).then((reason) => {
@@ -287,7 +289,7 @@ async function login(
   view.setActive(true)
   layout.replaceChildren(view.el)
   view.focus()
-  view.print(readIssue(rt, hostname))
+  await showLanding(view, rt)
   for (;;) {
     const name = await view.readLine({ plain: `${hostname} login: ` })
     if (name.type !== 'submit' || !name.value.trim()) continue
@@ -306,6 +308,57 @@ async function login(
   }
 }
 
+/**
+ * The pre-login page: a large serif welcome, the portrait, the grey
+ * introduction, then the login prompt. Text lives in /etc/landing and the
+ * picture's path in /etc/portrait; this function sets the pace.
+ * The portrait is inserted first so the type wraps beside it; a key or a click
+ * skips the rest of the sequence.
+ */
+async function showLanding(view: TermView, rt: Runtime) {
+  const landing = readLanding(rt)
+  try {
+    await document.fonts.load('400 17px Roboto')
+  } catch {
+    /* the fallback stack still works */
+  }
+  let skipped = false
+  const skip = () => {
+    skipped = true
+  }
+  window.addEventListener('keydown', skip, true)
+  window.addEventListener('mousedown', skip, true)
+  try {
+    const url = landing.portrait ? portraitUrl(rt, landing.portrait.path) : null
+    if (url && landing.portrait) view.printImage(url, landing.portrait.alt, skipped)
+    // A headline beside a floating plate starts at the top, not below a deep pad.
+    const beside = url ? ' beside' : ''
+    await view.print(typeBlock(landing.hero, 30), `hero${beside}`, { maxMs: 900 })
+    if (!skipped) await delay(400)
+    // Beside a plate the prose takes the whole column and the float shortens its lines.
+    await view.print(typeBlock(landing.body, 90), `intro${beside}`, {
+      maxMs: skipped ? 0 : INTRO_MS_MAX,
+    })
+  } finally {
+    window.removeEventListener('keydown', skip, true)
+    window.removeEventListener('mousedown', skip, true)
+  }
+}
+
+/** The URL of a binary in the content tree, or null when the path is missing or text. */
+function portraitUrl(rt: Runtime, path: string): string | null {
+  try {
+    const node = rt.fs.read(ROOT_USER, path)
+    if (node.type !== 'file' || !node.url) return null
+    return node.url
+  } catch {
+    return null
+  }
+}
+
+/** The motd is the first long page a visitor reads, so it types at a reading pace. */
+const MOTD_CPS = 140
+
 function intro(rt: Runtime, user: User): string {
   let text = ''
   const previous = rememberLogin(user.name)
@@ -314,7 +367,7 @@ function intro(rt: Runtime, user: User): string {
     const motd = rt.fs.read(user, '/etc/motd')
     if (motd.encoding === 'utf8') {
       const body = motd.content.endsWith('\n') ? motd.content : `${motd.content}\n`
-      text += typeBlock(linkQuotedCommands(body), 240)
+      text += typeBlock(linkQuotedCommands(body), MOTD_CPS)
     }
   } catch {
     text += `${link('help', 'help')}\n`
@@ -354,7 +407,7 @@ function ensureScratch(rt: Runtime, user: User) {
 
 function readHostname(rt: Runtime): string {
   try {
-    const file = rt.fs.read({ name: 'root', role: 'root' }, '/etc/hostname')
+    const file = rt.fs.read(ROOT_USER, '/etc/hostname')
     if (file.encoding === 'utf8' && file.content.trim()) return file.content.trim()
   } catch {
     /* fall back to the configured name */

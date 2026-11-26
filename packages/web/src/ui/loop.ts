@@ -4,6 +4,7 @@ import { runLine } from '@home/core/shell/runner'
 import type { CommandResult, Download } from '@home/core/shell/context'
 import { INTRO_MS_MAX } from './ansi'
 import { presentStage } from './present'
+import { printPage } from './page'
 import { promptParts } from './term'
 import { TermView } from './term'
 
@@ -15,7 +16,7 @@ type End = 'logout' | 'exit' | 'closed' | undefined
 export async function shellLoop(
   view: TermView,
   ctx: ShellCtx,
-  opts: { intro?: string; boot?: string; onPrompt?: () => void; onCommand?: (line: string, code: number) => void },
+  opts: { intro?: string; onPrompt?: () => void; onCommand?: (line: string, code: number) => void },
 ): Promise<'logout' | 'exit' | 'closed'> {
   ctx.host = view
   view.onTab = (line) => {
@@ -26,11 +27,8 @@ export async function shellLoop(
     }
   }
   if (opts.intro) await view.print(opts.intro, 'out', { maxMs: INTRO_MS_MAX })
-  if (opts.boot) {
-    const end = await execute(view, ctx, opts.boot, false, opts)
-    if (end) return end
-  }
   while (!ctx.closing) {
+    ctx.columns = view.columns()
     opts.onPrompt?.()
     view.setHistory(ctx.history)
     const read = await view.readLine(promptParts(ctx))
@@ -87,7 +85,10 @@ async function run(view: TermView, ctx: ShellCtx, line: string): Promise<Command
     /* the command already reported a failed write */
   }
   if (result.clear) view.clear()
-  if (result.stdout) await view.print(result.stdout)
+  if (result.stdout) {
+    if (result.prose) await printPage(view, result.stdout)
+    else await view.print(result.stdout)
+  }
   if (result.stderr) await view.print(result.stderr, 'err')
   if (result.pager !== undefined) await view.pager(result.pager)
   for (const file of result.downloads ?? []) saveDownload(file)

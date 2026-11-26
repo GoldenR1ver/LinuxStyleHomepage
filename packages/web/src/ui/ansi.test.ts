@@ -42,8 +42,32 @@ describe('ansi', () => {
     expect(fade[0]?.anim).toEqual({ mode: 'fade', rate: 20 })
   })
 
-  it('carries color, links and motion across a newline', () => {
-    const text = `${ESC}[33ma${ESC}]8;;cmd:ls${ESC}\\b\nc${ESC}]8;;${ESC}\\!${ESC}[0m`
+  it('reads a ground and pairs it with a foreground', () => {
+    const yellow = parseAnsi(`${ESC}[43mWARN${ESC}[0m`)
+    expect(yellow[0]).toEqual({ text: 'WARN', className: 'bg-yellow' })
+
+    const both = parseAnsi(`${ESC}[30;47mok${ESC}[49m end`)
+    expect(both[0]).toEqual({ text: 'ok', className: 'fg-black bg-white' })
+    expect(both[1]).toEqual({ text: ' end', className: 'fg-black' })
+
+    const bright = parseAnsi(`${ESC}[104mx`)
+    expect(bright[0]?.className).toBe('bg-blue')
+  })
+
+  it('reads slots 38 and 39 as purple and brown', () => {
+    expect(parseAnsi(`${ESC}[38mx`)[0]?.className).toBe('fg-purple')
+    expect(parseAnsi(`${ESC}[39mx`)[0]?.className).toBe('fg-brown')
+    // 0 still clears everything, including the extra inks.
+    expect(parseAnsi(`${ESC}[38;43mx${ESC}[0my`)[1]?.className).toBe('')
+  })
+
+  it('drops a ground on reset', () => {
+    const spans = parseAnsi(`${ESC}[41mred${ESC}[0m plain`)
+    expect(spans[0]?.className).toBe('bg-red')
+    expect(spans[1]?.className).toBe('')
+  })
+
+  it('carries color, links and motion across a newline', () => {    const text = `${ESC}[33ma${ESC}]8;;cmd:ls${ESC}\\b\nc${ESC}]8;;${ESC}\\!${ESC}[0m`
     const lines = parseLines(text)
     expect(lines).toHaveLength(2)
     expect(lines[0]?.spans.map((span) => span.text).join('')).toBe('ab')
