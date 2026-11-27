@@ -1,3 +1,7 @@
+# content/etc/landing
+# Line 1: a picture in content/ such as /home/owner/notes/me.jpg, or none.
+# Line 2: the headline in the serif face. The lines after it are the message.
+/home/owner/notes/humanities/me.jpg
 Welcome
 
 I am Yujiang Adam Li, a final-year undergraduate at Nanjing University. My research interests include LLM-based multi-agent systems, computational social science, and trustworthy social media.

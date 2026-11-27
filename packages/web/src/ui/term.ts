@@ -2,6 +2,7 @@ import { stripLinks } from '@home/core/kernel/text'
 import { homeDir } from '@home/core/kernel/auth'
 import type { ShellCtx, PickOptions, PickedFile } from '@home/core/shell/context'
 import { MOTION_MS_MAX, parseLines, revealDuration, revealSchedule, typedIndex, type Line as TextLine, type Span, type TypedRun } from './ansi'
+import { currentTheme, setTheme, autoTheme, THEMES } from './themes'
 
 export interface Prompt {
   plain?: string
@@ -40,6 +41,13 @@ export class TermView {
   readonly el: HTMLElement
   onActivate: (() => void) | null = null
   onTab: ((line: string) => void) | null = null
+  /** Answers `style` in the shell. The page restyles itself; the shell only asks. */
+  readonly style = {
+    list: () => [...THEMES] as string[],
+    current: () => currentTheme() as string,
+    set: (name: string) => setTheme(name) !== null,
+    auto: () => autoTheme() as string,
+  }
 
   private readonly scroll: HTMLElement
   private readonly pagerEl: HTMLElement
@@ -516,14 +524,16 @@ export class TermView {
       this.prompt.textContent = prompt.plain
       return
     }
-    this.prompt.append(
+    // The identity plate: one element so a theme can paint `user@host` as a
+    // single block. The colon, the cwd and the sigil stay separate.
+    const who = document.createElement('span')
+    who.className = 'who'
+    who.append(
       span(prompt.root ? 'user root' : 'user', prompt.user ?? ''),
       text('@'),
       span('host', prompt.host ?? ''),
-      text(':'),
-      span('cwd', prompt.cwd ?? ''),
-      text(`${prompt.sig ?? '$'} `),
     )
+    this.prompt.append(who, text(':'), span('cwd', prompt.cwd ?? ''), text(`${prompt.sig ?? '$'} `))
   }
 
   private addLine(line: TextLine, kind: string, plan: MotionPlan): HTMLElement {

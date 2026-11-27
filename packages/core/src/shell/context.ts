@@ -22,6 +22,22 @@ export interface Host {
   askSecret(prompt: string): Promise<string | null>
   /** null means the chooser was dismissed. */
   pickFiles(options?: PickOptions): Promise<PickedFile[] | null>
+  /** Restyling is a page capability. A real terminal leaves this out. */
+  style?: HostStyle
+}
+
+/**
+ * The page can swap its own stylesheet; the shell only names a style. The shell
+ * says "style", the page calls the file a "theme"; one list, two words.
+ */
+export interface HostStyle {
+  /** In the order the numbers count from: index 0 is the first entry. */
+  list(): readonly string[]
+  current(): string
+  /** false means the name is not a style this build carries. */
+  set(name: string): boolean
+  /** Forget the chosen style and follow the browser's light/dark preference. */
+  auto?: () => string
 }
 
 export interface Download {

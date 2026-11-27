@@ -31,38 +31,42 @@ describe('landing', () => {
     expect(landing.portrait).toBeNull()
   })
 
-  it('reads the portrait path and its alt text', () => {
+  it('reads a picture from the first line and the headline from the second', () => {
     const { rt } = boot({ user: root })
-    write(rt, '/etc/portrait', '/home/owner/notes/me.jpg\nYujiang Adam Li\n')
-    expect(readLanding(rt).portrait).toEqual({
-      path: '/home/owner/notes/me.jpg',
-      alt: 'Yujiang Adam Li',
+    write(rt, '/etc/landing', '/home/owner/notes/me.jpg\nWelcome\n\nHello there.\n')
+    expect(readLanding(rt)).toEqual({
+      hero: 'Welcome',
+      body: 'Hello there.',
+      portrait: { path: '/home/owner/notes/me.jpg', alt: 'Portrait' },
     })
   })
 
-  it('falls back to a plain alt and ignores an empty portrait file', () => {
+  it('keeps a headline that is not an image path as the headline', () => {
     const { rt } = boot({ user: root })
-    write(rt, '/etc/portrait', '/home/owner/me.jpg\n')
-    expect(readLanding(rt).portrait?.alt).toBe('Portrait')
-    write(rt, '/etc/portrait', '\n')
+    write(rt, '/etc/landing', 'Welcome\n\nHello there.\n')
     expect(readLanding(rt).portrait).toBeNull()
+    expect(readLanding(rt).hero).toBe('Welcome')
   })
 
-  it('hides the portrait on an empty file, or when the path line says none', () => {
+  it('hides the picture when the first line says none', () => {
     const { rt } = boot({ user: root })
-    write(rt, '/etc/portrait', '')
-    expect(readLanding(rt).portrait).toBeNull()
-    write(rt, '/etc/portrait', 'none\n')
-    expect(readLanding(rt).portrait).toBeNull()
-    write(rt, '/etc/portrait', '  OFF  \nYujiang\n')
-    expect(readLanding(rt).portrait).toBeNull()
+    write(rt, '/etc/landing', 'none\nWelcome\n\nBody\n')
+    expect(readLanding(rt)).toEqual({ hero: 'Welcome', body: 'Body', portrait: null })
   })
 
   it('skips comment lines, so the file can carry its own instructions', () => {
     const { rt } = boot({ user: root })
-    write(rt, '/etc/portrait', '# a path in content/, or none\n\n/home/owner/me.jpg\nYujiang\n')
-    expect(readLanding(rt).portrait).toEqual({ path: '/home/owner/me.jpg', alt: 'Yujiang' })
-    write(rt, '/etc/portrait', '# only comments\n')
-    expect(readLanding(rt).portrait).toBeNull()
+    write(rt, '/etc/landing', '# line 1 is a picture\n\n/home/owner/me.png\nWelcome\nBody\n')
+    expect(readLanding(rt)).toEqual({
+      hero: 'Welcome',
+      body: 'Body',
+      portrait: { path: '/home/owner/me.png', alt: 'Portrait' },
+    })
+    write(rt, '/etc/landing', '# only comments\n')
+    expect(readLanding(rt)).toEqual({
+      hero: 'Welcome',
+      body: 'I am Yujiang Adam Li. This page is a terminal running locally in your browser.',
+      portrait: null,
+    })
   })
 })

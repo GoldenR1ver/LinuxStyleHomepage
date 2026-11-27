@@ -1,0 +1,60 @@
+/*
+ * Swiss International Style: paper, ink, one signal red, one link blue, one
+ * yellow block. This file owns colour and only colour; app.css owns the
+ * skeleton, the three typefaces and every layout number, so a theme never has to
+ * restate the page in order to change its paint.
+ *
+ * Adding a theme means adding one file like this one, then listing its name in
+ * themes/index.ts. The bare `:root` in the selector covers a page that has no
+ * attribute yet, so a build without the attribute still renders.
+ */
+
+:root,
+:root[data-theme="swiss"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #000000;
+  --ink-soft: #555555;
+  --dim: #6b7280;
+  --rule: #d4d4d4;
+  --line: var(--rule);
+  --surface: #f0f0f0;
+  --status: #ffffff;
+  --link: #0057b8;
+  --block: #ffcc00;
+  --accent: #dc143c;
+  --active: var(--accent);
+
+  /*
+   * One hue in two registers. A FILL is the owner's saturated ANSI value and is
+   * only ever a ground, a mark or a rule. An INK is the same hue darkened until
+   * it reads on paper (>= 4.5:1 on white) and is the only thing text may use.
+   */
+  --fill-black: #000000;
+  --fill-white: #ffffff;
+  --fill-red: #dc143c;
+  --fill-green: #00ff99;
+  --fill-yellow: #ffcc00;
+  --fill-blue: #0057b8;
+  --fill-orange: #ff8800;
+  --fill-cyan: #00ffee;
+  --fill-purple: #ff00cc;
+  --ink-black: #000000;
+  --ink-white: #000000;
+  --ink-red: #dc143c;
+  --ink-green: #007a4d;
+  --ink-yellow: #e4af00;
+  --ink-orange: #b34700;
+  --ink-cyan: #00696e;
+  --ink-purple: #c0008f;
+  --ink-brown: #6c3b00;
+
+  /* The pair a colour field reads against; a theme decides which inks it needs. */
+  --on-fill-dark: #000000;
+  --on-fill-light: #ffffff;
+  /* A PDF page is paper no matter what the page around it is. */
+  --pdf-paper: #ffffff;
+}
+
+/* The default crop treatment. A theme that wants another look outranks this. */
+.ln.portrait img { filter: contrast(1.06); }

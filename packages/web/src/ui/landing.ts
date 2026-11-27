@@ -19,52 +19,50 @@ export interface Landing {
   portrait: Portrait | null
 }
 
+/** A path with an image extension. A headline never looks like one, so the two cannot be confused. */
+const IMAGE = /^\/.*\.(?:jpe?g|png|gif|webp)$/i
+/** Saying one of these on the picture line leaves the picture out. */
+const PORTRAIT_OFF = new Set(['none', 'off', '-'])
+
 /**
- * The words shown before login. The text lives in content/etc/landing so it is
- * edited like any other page; the type, pace, and spacing belong to the view.
+ * The page shown before login, read from `/etc/landing`:
+ *
+ *     /home/owner/notes/me.jpg   ← optional: a picture in this filesystem, or none
+ *     Welcome                    ← the line in the serif face
+ *     I am Yujiang Adam Li…      ← the message below it
+ *
+ * Blank lines and lines starting with `#` are ignored, so the file can carry its
+ * own instructions. A first line that does not look like an image path is the
+ * headline, which keeps the file valid when someone deletes the picture.
  */
 export function readLanding(rt: Runtime): Landing {
   let text = ''
   try {
     const file = rt.fs.read(ROOT, '/etc/landing')
-    if (file.encoding === 'utf8') text = file.content.replace(/\r\n/g, '\n')
+    if (file.encoding === 'utf8') text = file.content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
   } catch {
     /* a missing file still has a landing */
-  }
-  const portrait = readPortrait(rt)
-  const lines = text.split('\n')
-  const first = lines.findIndex((line) => line.trim().length > 0)
-  if (first < 0) return { hero: FALLBACK_HERO, body: FALLBACK_BODY, portrait }
-  return {
-    hero: lines[first]?.trim() || FALLBACK_HERO,
-    body: lines.slice(first + 1).join('\n').trim() || FALLBACK_BODY,
-    portrait,
-  }
-}
-
-/** The picture is off when the path line says so, or when no path line is left. */
-const PORTRAIT_OFF = new Set(['none', 'off', '-'])
-
-/**
- * The portrait the landing shows between the headline and the introduction.
- * `/etc/portrait` holds a path in this filesystem on its first line, then the
- * alt text. Lines starting with `#` are comments, and an empty file, a blank
- * path, or `none` hides the picture: the page is edited like any other file.
- */
-function readPortrait(rt: Runtime): Portrait | null {
-  let text = ''
-  try {
-    const file = rt.fs.read(ROOT, '/etc/portrait')
-    if (file.encoding !== 'utf8') return null
-    text = file.content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  } catch {
-    return null
   }
   const lines = text
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('#'))
-  const path = lines[0] ?? ''
-  if (!path || PORTRAIT_OFF.has(path.toLowerCase())) return null
-  return { path, alt: lines.slice(1).join(' ') || 'Portrait' }
+
+  const split = splitPortrait(lines)
+  const rest = split.lines
+  if (!rest.length) return { hero: FALLBACK_HERO, body: FALLBACK_BODY, portrait: split.portrait }
+  return {
+    hero: rest[0] || FALLBACK_HERO,
+    body: rest.slice(1).join('\n').trim() || FALLBACK_BODY,
+    portrait: split.portrait,
+  }
+}
+
+/** Take the leading picture line when it is one, and keep the rest as the page. */
+function splitPortrait(lines: string[]): { portrait: Portrait | null; lines: string[] } {
+  const head = lines[0] ?? ''
+  if (!head) return { portrait: null, lines }
+  if (PORTRAIT_OFF.has(head.toLowerCase())) return { portrait: null, lines: lines.slice(1) }
+  if (!IMAGE.test(head)) return { portrait: null, lines }
+  return { portrait: { path: head, alt: 'Portrait' }, lines: lines.slice(1) }
 }

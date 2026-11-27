@@ -480,6 +480,66 @@ describe('shell', () => {
     expect(mixed).toContain('🧾 page.log')
   })
 
+  it('walks, numbers and auto-selects styles when the page can restyle itself', async () => {
+    const { ctx } = boot()
+    // A real terminal has no style, so the command says so instead of failing silently.
+    expect((await runLine('style', ctx)).code).toBe(1)
+    expect((await runLine('style', ctx)).stderr).toContain('cannot restyle itself')
+
+    const names = ['swiss', 'terminator']
+    let worn = 'swiss'
+    ctx.host = {
+      ...ctx.host,
+      style: {
+        list: () => names,
+        current: () => worn,
+        set(name: string) {
+          if (!names.includes(name)) return false
+          worn = name
+          return true
+        },
+        auto() {
+          worn = 'swiss'
+          return worn
+        },
+      },
+    }
+
+    const listed = (await runLine('style -l', ctx)).stdout ?? ''
+    expect(listed).toContain('* 0  swiss')
+    expect(listed).toContain('  1  terminator')
+
+    // No argument walks the list and wraps at the end.
+    expect((await runLine('style', ctx)).stdout).toContain('terminator')
+    expect(worn).toBe('terminator')
+    expect((await runLine('style', ctx)).stdout).toContain('swiss')
+    expect(worn).toBe('swiss')
+
+    // A number picks by index, counting from 0: 1 is the dark style.
+    expect((await runLine('style 1', ctx)).stdout).toContain('terminator')
+    expect(worn).toBe('terminator')
+    expect((await runLine('style 0', ctx)).stdout).toContain('swiss')
+    expect(worn).toBe('swiss')
+
+    // A name still works.
+    expect((await runLine('style terminator', ctx)).code).toBe(0)
+    expect(worn).toBe('terminator')
+
+    // auto hands control back to the browser and reports where it landed.
+    expect((await runLine('style auto', ctx)).stdout).toContain('auto (swiss)')
+    expect(worn).toBe('swiss')
+
+    const out = await runLine('style 9', ctx)
+    expect(out.code).toBe(1)
+    expect(out.stderr).toContain('out of range')
+
+    const bad = await runLine('style paper', ctx)
+    expect(bad.code).toBe(1)
+    expect(bad.stderr).toContain('not found')
+    expect(bad.stderr).toContain('0-1')
+    expect(worn).toBe('swiss')
+  })
+
   it('links every line of a tree, and keeps the link out of a pipe and a file', async () => {
     const { ctx, fs } = boot()
     const tree = (await runLine('tree -L 1', ctx)).stdout ?? ''

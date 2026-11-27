@@ -309,11 +309,9 @@ async function login(
 }
 
 /**
- * The pre-login page: a large serif welcome, the portrait, the grey
- * introduction, then the login prompt. Text lives in /etc/landing and the
- * picture's path in /etc/portrait; this function sets the pace.
- * The portrait is inserted first so the type wraps beside it; a key or a click
- * skips the rest of the sequence.
+ * The pre-login page: a large serif welcome, then the portrait at the right edge
+ * under it, then the message wrapping around the picture. Text lives in
+ * /etc/landing; this function sets the pace. A key or a click skips the rest.
  */
 async function showLanding(view: TermView, rt: Runtime) {
   const landing = readLanding(rt)
@@ -329,14 +327,16 @@ async function showLanding(view: TermView, rt: Runtime) {
   window.addEventListener('keydown', skip, true)
   window.addEventListener('mousedown', skip, true)
   try {
+    await view.print(typeBlock(landing.hero, 30), 'hero', { maxMs: 900 })
     const url = landing.portrait ? portraitUrl(rt, landing.portrait.path) : null
-    if (url && landing.portrait) view.printImage(url, landing.portrait.alt, skipped)
-    // A headline beside a floating plate starts at the top, not below a deep pad.
-    const beside = url ? ' beside' : ''
-    await view.print(typeBlock(landing.hero, 30), `hero${beside}`, { maxMs: 900 })
-    if (!skipped) await delay(400)
-    // Beside a plate the prose takes the whole column and the float shortens its lines.
-    await view.print(typeBlock(landing.body, 90), `intro${beside}`, {
+    if (url && landing.portrait) {
+      // After the headline on purpose: the float then starts below `Welcome`,
+      // and only the message below it wraps.
+      view.printImage(url, landing.portrait.alt, skipped)
+      if (!skipped) await delay(400)
+    }
+    // Beside the plate the message fills the column; the float shortens its lines.
+    await view.print(typeBlock(landing.body, 90), url ? 'intro beside' : 'intro', {
       maxMs: skipped ? 0 : INTRO_MS_MAX,
     })
   } finally {

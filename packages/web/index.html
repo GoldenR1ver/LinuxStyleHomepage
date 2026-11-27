@@ -4,13 +4,41 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="A personal homepage you read from a shell." />
-    <meta name="theme-color" content="#ffffff" />
-    <meta name="color-scheme" content="light" />
+    <!-- Two tags so the address bar is right before any script runs. applyTheme()
+         rewrites both once the reader's own choice is known. -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#191815" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
     <title>home</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <style>
-      html, body { margin: 0; height: 100%; background: #ffffff; }
-    </style>
+    <script>
+      /*
+       * Wear the right style before the first paint, so a page never shows the
+       * light paper and then swaps to the dark terminal.
+       * The key, the names and the default must match
+       * packages/web/src/ui/themes/index.ts; main.ts applies the rest.
+       */
+      ;(function () {
+        var root = document.documentElement
+        var dark = 'terminator'
+        var light = 'swiss'
+        var saved = null
+        try {
+          saved = localStorage.getItem('hp.theme')
+        } catch (e) {
+          /* a blocked store leaves us with the machine's preference */
+        }
+        if (saved === dark || saved === light) {
+          root.dataset.theme = saved
+          return
+        }
+        try {
+          root.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? dark : light
+        } catch (e) {
+          /* no matchMedia: the stylesheet's own fallback is the light style */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

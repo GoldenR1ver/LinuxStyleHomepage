@@ -1,0 +1,178 @@
+/*
+ * Terminator, re-cut in African textile.
+ *
+ * Ground: a warm charcoal, one step greyer than the reference's dark wood, so
+ * the page reads as a terminal at night rather than a brown room.
+ * Accents: Kente gold, kente orange, forest green, sand — all pushed brighter
+ * than the swatch book, because on a dark ground the decoration must carry the
+ * contrast that the paper used to carry.
+ * Lines: the vintage half of the reference. A woven hairline grid on every pane,
+ * a four-colour strip across the top, a double rule under the status bar.
+ *
+ * Nothing here has volume: no blur, no gradient blend, no radius. Depth is
+ * simulated only by stacking hard blocks with an offset, which is how print and
+ * cloth do it.
+ */
+
+:root[data-theme="terminator"] {
+  color-scheme: dark;
+
+  /* ---- grounds -------------------------------------------------------- */
+  --bg: #191815;            /* warm charcoal */
+  --fg: #ece3d2;            /* parchment */
+  --ink-soft: #c6baa5;      /* sand */
+  --dim: #968b79;
+  --rule: #3a362d;
+  --line: var(--rule);
+  --surface: #232019;
+  --status: #121110;
+  --pdf-paper: #ffffff;     /* a PDF page is still paper */
+
+  /* ---- one signal, one highlight -------------------------------------- */
+  --accent: #e4692f;        /* kente orange, lifted for a dark ground */
+  --active: var(--accent);
+  --link: #f0c75e;          /* gold: emphasis in the motd, link in prose */
+  --block: #f0c75e;
+
+  /* ---- ANSI fills: the owner's saturated slots, as grounds -------------- */
+  --fill-black: #000000;
+  --fill-white: #ece3d2;
+  --fill-red: #b23a34;      /* rust */
+  --fill-green: #00ff99;
+  --fill-yellow: #ffcc00;
+  --fill-blue: #35507d;     /* the one cold hue, kept deep and rare */
+  --fill-orange: #ff8800;
+  --fill-cyan: #00ffee;
+  --fill-purple: #ff00cc;
+
+  /* ---- ANSI inks: brightened, because this page is the dark ground ------ */
+  --ink-black: #8a8172;     /* the slot that would vanish goes soft grey */
+  --ink-white: #ece3d2;
+  --ink-red: #f2727a;
+  --ink-green: #5fd39a;
+  --ink-yellow: #f0c75e;
+  --ink-orange: #f09055;
+  --ink-cyan: #5fdcc8;
+  --ink-purple: #e884c6;
+  --ink-brown: #c08a58;
+
+  /* ---- ink that reads on a colour field -------------------------------- */
+  --on-fill-dark: #14120e;
+  --on-fill-light: #f7f0e2;
+
+  /* ---- theme-only numbers ---------------------------------------------- */
+  --weave-warp: rgba(236, 227, 210, 0.032);
+  --weave-weft: rgba(236, 227, 210, 0.016);
+  --woven-gap: 30px;
+  --chip: #f0c75e;          /* gold, struck on the username only */
+  --chip-ink: #171411;
+  --band: #2e2114;          /* the cloth the whole identity sits on: deep espresso */
+  --plate-shadow: #2a261e;
+  --link-line: #6f6853;
+  /* The woven band across the top: two long threads, in the retro-vintage
+   * palette — saddle brown and golden tan — so the band is warm and readable on
+   * the charcoal ground instead of sinking into it. */
+  --band-a: #8b4513;        /* saddle brown */
+  --band-b: #d4a373;        /* golden tan */
+
+  /* A terminal is denser than a page: shorter gaps, a heavier command rule. */
+  --cmd-gap: 18px;
+  --rule-w: 3px;
+  --rule-gap: 11px;
+  --col-inset: max(16px, calc((100% - 780px) / 2));
+  --portrait-w: 190px;
+}
+
+/* ---- cloth -------------------------------------------------------------- */
+
+/* Warp and weft: a 1px grid, faint enough to be felt rather than seen. */
+:root[data-theme="terminator"] .pane {
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(90deg, var(--weave-warp) 0 1px, transparent 1px var(--woven-gap)),
+    repeating-linear-gradient(0deg, var(--weave-weft) 0 1px, transparent 1px var(--woven-gap));
+}
+
+/*
+ * The band: two long threads crossing the top, the way a kente strip reads at a
+ * distance. Fewer blocks than a stripe pattern, each one long enough to be a
+ * field rather than a tick. The colour comes from the retro print palette, so the
+ * band frames the page in warm ink rather than repeating the ground.
+ */
+:root[data-theme="terminator"] .screen::before {
+  content: '';
+  flex: none;
+  height: 4px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--band-a) 0 62px,
+    var(--bg) 62px 74px,
+    var(--band-b) 74px 118px,
+    var(--bg) 118px 130px
+  );
+}
+
+/* ---- rules -------------------------------------------------------------- */
+
+/* A command is a rust bar; what it printed keeps none. */
+:root[data-theme="terminator"] .entered { border-left-color: var(--accent); }
+:root[data-theme="terminator"] .row::before { background: var(--accent); }
+
+/* The vintage double rule, and small caps as a label. */
+:root[data-theme="terminator"] .status {
+  border-top: 3px double var(--rule);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+}
+:root[data-theme="terminator"] .session { color: var(--link); }
+
+/* Underlines are a line, so they get a line's colour, not an invisible tint. */
+:root[data-theme="terminator"] .ln-link { text-decoration-color: var(--link-line); }
+
+/* ---- the identity plate ------------------------------------------------- */
+
+/*
+ * guest@home sits on cloth: a dark band across the whole identity, with the
+ * username struck on it in gold, the way a name is woven into a kente strip.
+ * The band, not the gold, is what repeats at every prompt, so a long hostname
+ * stays quiet and the block never turns into a highlight bar.
+ */
+:root[data-theme="terminator"] .prompt .who {
+  background: var(--band);
+  color: var(--ink-soft);
+  padding: 0 6px 0 0;
+}
+
+:root[data-theme="terminator"] .prompt .who .user {
+  background: var(--chip);
+  color: var(--chip-ink);
+  padding: 0 6px;
+}
+
+:root[data-theme="terminator"] .prompt .who .host { color: var(--ink-soft); }
+
+/* Root keeps its signal, drawn as an underline inside the gold. */
+:root[data-theme="terminator"] .prompt .who .user.root {
+  color: var(--chip-ink);
+  box-shadow: inset 0 -3px 0 var(--fill-red);
+}
+
+:root[data-theme="terminator"] .prompt .cwd { color: var(--dim); }
+:root[data-theme="terminator"] .cmd { caret-color: var(--link); }
+
+/* ---- the plate ---------------------------------------------------------- */
+
+/* A hard offset block: print's version of a shadow, not the screen's. */
+:root[data-theme="terminator"] .ln.portrait img {
+  filter: sepia(0.26) contrast(1.08) brightness(0.97);
+  box-shadow: 6px 6px 0 var(--plate-shadow);
+}
+
+/* ---- paper surfaces ----------------------------------------------------- */
+
+:root[data-theme="terminator"] .vim-gutter { color: var(--dim); }
+:root[data-theme="terminator"] .stage-close {
+  border-color: var(--rule);
+  box-shadow: 3px 3px 0 var(--accent);
+}
+:root[data-theme="terminator"] .stage-doc pre { background: var(--surface); }

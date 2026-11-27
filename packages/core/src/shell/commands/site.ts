@@ -4,6 +4,7 @@ import { stripLinks } from '../../kernel/text'
 import { FsError } from '../../kernel/vfs'
 import type { PaneDir } from '../../mux/mux'
 import type { ShellCtx } from '../context'
+import type { CommandResult } from '../context'
 import type { CommandSpec } from './types'
 import { mailCommand } from './mail'
 import { link, linkPath, resolvePath } from './helpers'
@@ -226,6 +227,56 @@ export const siteCommands: CommandSpec[] = [
         code: 1,
         stderr: 'tmux: ls | split-window [-h] | select-pane -L|-R|-U|-D | kill-pane | new-window | next-window | prev-window | new -s name | switch -t name | kill-session -t name\n',
       }
+    },
+  },
+  {
+    name: 'style',
+    group: 'site',
+    summary: 'list or change the visual style',
+    usage: 'style [-l] [number|name|auto]',
+    manual:
+      'With no argument, switch to the next style. A number picks one by index, counting from 0: "style 0" is the light paper style, "style 1" the dark terminal style. A name works too, and "style -l" prints the numbers. "style auto" forgets the choice and follows the browser, so the page opens light or dark to match the machine it is read on. The page switches at once and remembers the choice in this browser; a real terminal cannot restyle itself.',
+    run(ctx, args) {
+      const host = ctx.host.style
+      if (!host) return { code: 1, stderr: 'style: this terminal cannot restyle itself\n' }
+      const names = [...host.list()]
+      const nowhere = names.length ? `try 0-${names.length - 1}` : 'this build carries no style'
+
+      const listing = () => {
+        const now = host.current()
+        const rows = names.map((name, index) => {
+          const mark = name === now ? '*' : ' '
+          return `  ${mark} ${index}  ${col(name, 12)}`
+        })
+        return `styles:\n${rows.join('\n')}\n`
+      }
+
+      const apply = (name: string): CommandResult => {
+        if (!host.set(name)) return { code: 1, stderr: `style: ${name}: not found; ${nowhere}\n` }
+        return { code: 0, stdout: `style: ${name}\n` }
+      }
+
+      const arg = (args[0] ?? '').trim()
+      if (arg === '-l' || arg === '--list') return { code: 0, stdout: listing() }
+      if (!arg) {
+        // A bare call walks the list, which is how you try a palette you cannot name.
+        const from = names.indexOf(host.current())
+        const next = names[(from + 1) % names.length]
+        if (!next) return { code: 1, stderr: `style: ${nowhere}\n` }
+        return apply(next)
+      }
+      if (arg === 'auto') {
+        if (!host.auto) return { code: 1, stderr: 'style: this page cannot follow the browser\n' }
+        return { code: 0, stdout: `style: auto (${host.auto()})\n` }
+      }
+      if (/^\d+$/.test(arg)) {
+        const name = names[Number(arg)]
+        if (!name) {
+          return { code: 1, stderr: `style: ${arg}: out of range; 0-${names.length - 1}\n` }
+        }
+        return apply(name)
+      }
+      return apply(arg)
     },
   },
 ]
