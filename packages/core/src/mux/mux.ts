@@ -15,12 +15,26 @@ export interface SessionHost {
   newSession(name: string): boolean
   switchSession(name: string): boolean
   killSession(name: string): boolean
+  /** `tmux list-windows`: one line per window in the attached session. */
+  windowsText(): string
+  /** `tmux list-panes`: one line per pane in the active window. */
+  panesText(): string
+  /** `tmux rename-window NAME`, or null when no window carries that name. */
+  renameWindow(name: string): boolean
+  /** `tmux kill-window`, which collapses the session when it was the last one. */
+  killWindow(): boolean
+  /** `tmux resize-pane DIR [N]`: N cells, or one twentieth of the split. */
+  resizePane(dir: PaneDir, cells?: number): boolean
 }
 
 export type Layout =
   | { t: 'pane'; id: string }
-  | { t: 'row'; a: Layout; b: Layout }
-  | { t: 'col'; a: Layout; b: Layout }
+  | { t: 'row'; a: Layout; b: Layout; ratio: number }
+  | { t: 'col'; a: Layout; b: Layout; ratio: number }
+
+/** The share of the split the first child takes. Clamped so neither side vanishes. */
+export const RATIO_MIN = 0.1
+export const RATIO_MAX = 0.9
 
 export interface Win {
   id: string
@@ -84,7 +98,11 @@ export class Mux implements SessionHost {
   listText(): string {
     if (!this.sessions.length) return ''
     return `${this.sessions
-      .map((session) => `${session.name}${session === this.current ? '*' : ''} ${session.windows.length} windows`)
+      .map((session) => {
+        const count = session.windows.length
+        const mark = session === this.current ? '*' : ''
+        return `${session.name}${mark} ${count} ${count === 1 ? 'window' : 'windows'}`
+      })
       .join('\n')}\n`
   }
 
@@ -92,8 +110,10 @@ export class Mux implements SessionHost {
     const win = this.activeWindow()
     const pane = this.add(this.fork(this.activePane().ctx))
     const previous = win.active
-    win.layout = replacePane(win.layout, previous, (old) =>
-      dir === 'h' ? { t: 'row', a: old, b: { t: 'pane', id: pane.id } } : { t: 'col', a: old, b: { t: 'pane', id: pane.id } },
+    win.layout = replacePane(win.layout, previous, (old): Layout =>
+      dir === 'h'
+        ? { t: 'row', a: old, b: { t: 'pane', id: pane.id }, ratio: 0.5 }
+        : { t: 'col', a: old, b: { t: 'pane', id: pane.id }, ratio: 0.5 },
     )
     win.active = pane.id
     this.onPane?.(pane)
@@ -250,6 +270,110 @@ export class Mux implements SessionHost {
     this.seq += 1
     return { id: `w${this.seq}`, name: 'sh', layout: { t: 'pane', id: paneId }, active: paneId }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* inspection, naming and geometry                                  */
+  /* ---------------------------------------------------------------- */
+
+  windowsText(): string {
+    const session = this.require()
+    return `${session.windows
+      .map((win, index) => {
+        const mark = index === session.active ? '*' : ' '
+        const panes = countLayout(win.layout)
+        return `${index}: ${win.name}${mark}${panes > 1 ? ` (${panes} panes)` : ''}`
+      })
+      .join('\n')}\n`
+  }
+
+  panesText(): string {
+    const win = this.activeWindow()
+    const width = this.snapshot().find((pane) => pane.active)?.width ?? 0
+    return `${paneIds(win.layout)
+      .map((id) => {
+        const mark = id === win.active ? '*' : ' '
+        const size = id === win.active && width ? ` ${width} cols` : ''
+        return `${id}${mark}${size}`
+      })
+      .join('\n')}\n`
+  }
+
+  renameWindow(name: string): boolean {
+    const clean = name.trim()
+    if (!clean || clean.length > 32 || /[\r\n\0]/.test(clean)) return false
+    this.activeWindow().name = clean
+    this.onStatus?.()
+    return true
+  }
+
+  killWindow(): boolean {
+    const session = this.require()
+    if (session.windows.length <= 1) return false
+    const index = session.active
+    const win = session.windows[index]
+    if (!win) return false
+    for (const id of paneIds(win.layout)) {
+      const pane = this.panes.get(id)
+      if (pane) this.drop(pane)
+    }
+    session.windows.splice(index, 1)
+    session.active = Math.min(index, session.windows.length - 1)
+    this.onLayout?.()
+    return true
+  }
+
+  /**
+   * Move the divider that faces `dir`. `cells` is a terminal width, so the
+   * caller's console is the unit; without it, a twentieth of the split moves.
+   */
+  resizePane(dir: PaneDir, cells?: number): boolean {
+    const win = this.activeWindow()
+    const path = findPath(win.layout, win.active)
+    if (!path) return false
+    const horizontal = dir === 'L' || dir === 'R'
+    const forward = dir === 'R' || dir === 'D'
+    for (let index = path.length - 2; index >= 0; index--) {
+      const node = path[index]
+      const child = path[index + 1]
+      if (!node || node.t === 'pane' || !child) continue
+      if ((node.t === 'row') !== horizontal) continue
+      // The divider the key reaches is the one on the active pane's `dir` side:
+      // R and D need the active pane to be the first child, L and U the second.
+      const inSecond = node.b === child
+      if (inSecond === forward) continue
+      // Moving that divider outward grows the active pane, so the first child's
+      // share grows for R/D and shrinks for L/U.
+      const step = (cells ?? 1) * 0.02
+      const next = clampRatio(node.ratio + (forward ? step : -step))
+      if (next === node.ratio) return false
+      win.layout = resizeAt(win.layout, node, next)
+      this.onLayout?.()
+      return true
+    }
+    return false
+  }
+
+  /** A flat view of every pane, for `ps` and for the status line. */
+  snapshot(): { pid: number; user: string; cwd: string; win: string; active: boolean; width: number }[] {
+    const rows: { pid: number; user: string; cwd: string; win: string; active: boolean; width: number }[] = []
+    const session = this.current
+    if (!session) return rows
+    session.windows.forEach((win, index) => {
+      for (const id of paneIds(win.layout)) {
+        const pane = this.panes.get(id)
+        if (!pane) continue
+        rows.push({
+          pid: pane.pid,
+          user: pane.ctx.user.name,
+          cwd: pane.ctx.cwd,
+          win: String(index),
+          active: index === session.active && id === win.active,
+          width: pane.ctx.columns,
+        })
+      }
+    })
+    return rows
+  }
 }
 
 function countLayout(layout: Layout): number {
@@ -275,7 +399,19 @@ function hasPane(layout: Layout, id: string): boolean {
 
 function replacePane(layout: Layout, id: string, build: (old: Layout) => Layout): Layout {
   if (layout.t === 'pane') return layout.id === id ? build(layout) : layout
-  return { t: layout.t, a: replacePane(layout.a, id, build), b: replacePane(layout.b, id, build) }
+  return { ...layout, a: replacePane(layout.a, id, build), b: replacePane(layout.b, id, build) }
+}
+
+function resizeAt(layout: Layout, target: Layout, ratio: number): Layout {
+  if (layout === target) {
+    return layout.t === 'pane' ? layout : { ...layout, ratio }
+  }
+  if (layout.t === 'pane') return layout
+  return { ...layout, a: resizeAt(layout.a, target, ratio), b: resizeAt(layout.b, target, ratio) }
+}
+
+function clampRatio(value: number): number {
+  return Math.min(RATIO_MAX, Math.max(RATIO_MIN, Math.round(value * 100) / 100))
 }
 
 function removePane(layout: Layout, id: string): Layout | null {
@@ -285,7 +421,7 @@ function removePane(layout: Layout, id: string): Layout | null {
   if (a === layout.a && b === layout.b) return layout
   if (!a) return b
   if (!b) return a
-  return { t: layout.t, a, b }
+  return { ...layout, a, b }
 }
 
 function neighbor(layout: Layout, id: string, dir: PaneDir): string | null {

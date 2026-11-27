@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { runLine } from './runner'
-import { boot } from '../testkit'
+import { boot, guest, ownerUser, rootUser } from '../testkit'
 import { stripLinks } from '../kernel/text'
 import { MAX_UPLOAD_BYTES } from '../kernel/types'
 import { FsError } from '../kernel/vfs'
 
-const root = { name: 'root', role: 'root' as const }
-const ada = { name: 'ada', role: 'guest' as const }
+const root = rootUser
+const ada = guest('ada')
 
 describe('shell', () => {
   it('pipes and searches', async () => {
@@ -20,25 +20,19 @@ describe('shell', () => {
   })
 
   it('keeps guest files in the browser and refuses published writes', async () => {
-    const { ctx, fs, remote } = boot({ stdin: 'hello\n' })
-    const written = await runLine('echo hi > /tmp/ada/a.txt', ctx)
+    const { ctx, fs } = boot({ stdin: 'hello\n' })
+    const written = await runLine('echo hi > /home/ada/a.txt', ctx)
     expect(written.code).toBe(0)
-    expect(fs.read(ctx.user, '/tmp/ada/a.txt').content).toBe('hi\n')
+    expect(fs.read(ctx.user, '/home/ada/a.txt').content).toBe('hi\n')
     const denied = await runLine('echo x > /home/owner/about.md', ctx)
     expect(denied.code).toBe(1)
     expect(fs.read(ctx.user, '/home/owner/about.md').content).toBe('about\n')
-    expect(remote.commits).toHaveLength(0)
     const secret = await runLine('cat /root/README.md', ctx)
     expect(secret.code).toBe(1)
   })
 
   it('stages a guestbook note and sends it only on mail push', async () => {
-    const { ctx, fs, mail, remote, rt } = boot({ stdin: 'hello\n', webhook: true })
-    let tokenReads = 0
-    rt.tokens.get = () => {
-      tokenReads += 1
-      return 'ghp_should_not_be_sent'
-    }
+    const { ctx, fs, mail, rt } = boot({ stdin: 'hello\n', webhook: true })
     const saved = await runLine('cat > /var/guestbook/ada.txt', ctx)
     expect(saved.code).toBe(0)
     expect(fs.read(ctx.user, '/var/guestbook/ada.txt').content).toBe('hello\n')
@@ -56,8 +50,6 @@ describe('shell', () => {
     expect(mail.notes[0]?.body).toContain('reply-to: ada@example.com')
     expect(mail.notes[0]?.body).toContain('hello\n')
     expect(mail.notes[0]?.body).toContain('/var/guestbook/ada.txt')
-    expect(remote.commits).toHaveLength(0)
-    expect(tokenReads).toBe(0)
     expect(sent.stdout).not.toContain('http')
     expect(rt.outbox.draft.files).toHaveLength(0)
     expect(rt.outbox.draft.subject).toBe('')
@@ -193,21 +185,21 @@ describe('shell', () => {
     expect(read).toBe(false)
   })
 
-  it('lets root publish a file', async () => {
-    const { ctx, fs, remote } = boot({ user: root, authenticated: true })
+  it('lets root edit a page and keeps it in this browser', async () => {
+    const { ctx, fs } = boot({ user: root })
     const edited = await runLine('echo v2 > /home/owner/about.md', ctx)
     expect(edited.code).toBe(0)
     expect(fs.read(root, '/home/owner/about.md').content).toBe('v2\n')
-    expect(remote.commits).toHaveLength(1)
-    expect(remote.commits[0]?.changes[0]?.content).toBe('v2\n')
+    // The edit is in the overlay, and the overlay is what gets persisted.
+    expect(fs.exportLayer().map(([path]) => path)).toContain('/home/owner/about.md')
   })
 
-  it('refuses a root publish when the browser has no token', async () => {
-    const { ctx, fs } = boot({ user: root, authenticated: false })
-    const result = await runLine('echo v2 > /home/owner/about.md', ctx)
-    expect(result.code).toBe(1)
-    expect(result.stderr).toContain('token')
-    expect(fs.read(root, '/home/owner/about.md').content).toBe('about\n')
+  it('lets root delete a page and restore it from the image', async () => {
+    const { ctx } = boot({ user: root })
+    expect((await runLine('rm /home/owner/about.md', ctx)).code).toBe(0)
+    expect((await runLine('cat /home/owner/about.md', ctx)).code).toBe(1)
+    expect((await runLine('restore /home/owner/about.md', ctx)).code).toBe(0)
+    expect((await runLine('cat /home/owner/about.md', ctx)).stdout).toBe('about\n')
   })
 
   it('keeps mail inside the work tree and the fixed relay', async () => {
@@ -234,7 +226,7 @@ describe('shell', () => {
   })
 
   it('sends a comment about a published page without the page body', async () => {
-    const { ctx, mail, remote } = boot({ webhook: true })
+    const { ctx, mail } = boot({ webhook: true })
     expect((await runLine('mail -m "about the page"', ctx)).code).toBe(0)
     const added = await runLine('echo question | mail add /home/owner/about.md', ctx)
     expect(added.code).toBe(0)
@@ -246,18 +238,17 @@ describe('shell', () => {
     expect(body).toContain('question')
     expect(body).toContain('/home/owner/about.md')
     expect(body).not.toMatch(/^about$/m)
-    expect(remote.commits).toHaveLength(0)
   })
 
   it('stages scratch files and leaves a letter unsent when the relay is off', async () => {
     const { ctx, mail, rt } = boot()
-    await runLine('echo scratch > /tmp/ada/n.txt', ctx)
+    await runLine('echo scratch > /home/ada/n.txt', ctx)
     const added = await runLine('mail add', ctx)
     expect(added.code).toBe(0)
-    expect(added.stdout).toContain('/tmp/ada/n.txt')
+    expect(added.stdout).toContain('/home/ada/n.txt')
     expect(added.stdout).not.toContain('about.md')
     const listed = await runLine('mail', ctx)
-    expect(listed.stdout).toContain('/tmp/ada/n.txt')
+    expect(listed.stdout).toContain('/home/ada/n.txt')
     expect(listed.stdout).toContain('relay: off')
     expect(listed.stdout).toContain('user: (unset)')
     expect(listed.stdout).not.toContain('http')
@@ -268,7 +259,7 @@ describe('shell', () => {
     expect(sent.stderr).toContain('relay is not configured')
     expect(mail.notes).toHaveLength(0)
     expect(rt.outbox.draft.subject).toBe('hi')
-    expect(rt.outbox.draft.files).toContain('/tmp/ada/n.txt')
+    expect(rt.outbox.draft.files).toContain('/home/ada/n.txt')
     expect(rt.outbox.draft.from).toBe('ada@example.com')
     expect((await runLine('mail reset', ctx)).stdout).toContain('draft cleared')
     expect(rt.outbox.draft.subject).toBe('')
@@ -281,7 +272,7 @@ describe('shell', () => {
     await runLine('mkdir -p /var/guestbook/sub', ctx)
     await runLine('echo one > /var/guestbook/one.txt', ctx)
     await runLine('echo two > /var/guestbook/sub/two.txt', ctx)
-    await runLine('echo scratch > /tmp/ada/scratch.txt', ctx)
+    await runLine('echo scratch > /home/ada/scratch.txt', ctx)
     await runLine('mail reset', ctx)
     expect((await runLine('cd /var/guestbook', ctx)).code).toBe(0)
 
@@ -289,14 +280,14 @@ describe('shell', () => {
     expect(added.code).toBe(0)
     expect(added.stdout).toContain('/var/guestbook/one.txt')
     expect(added.stdout).toContain('/var/guestbook/sub/two.txt')
-    expect(rt.outbox.draft.files).not.toContain('/tmp/ada/scratch.txt')
+    expect(rt.outbox.draft.files).not.toContain('/home/ada/scratch.txt')
 
     const listed = await runLine('mail status', ctx)
     expect(listed.code).toBe(0)
     expect(listed.stdout).toContain('staged:')
     expect(listed.stdout).toContain('/var/guestbook/one.txt')
     expect(listed.stdout).toContain('not staged:')
-    expect(listed.stdout).toContain('/tmp/ada/scratch.txt')
+    expect(listed.stdout).toContain('/home/ada/scratch.txt')
 
     await runLine('mail -m "git habits"', ctx)
     const one = await runLine('mail reset one.txt', ctx)
@@ -307,7 +298,7 @@ describe('shell', () => {
 
     const all = await runLine('mail add -A', ctx)
     expect(all.code).toBe(0)
-    expect(rt.outbox.draft.files).toContain('/tmp/ada/scratch.txt')
+    expect(rt.outbox.draft.files).toContain('/home/ada/scratch.txt')
   })
 
   it('defines a function and binds positional arguments', async () => {
@@ -335,10 +326,10 @@ describe('shell', () => {
     expect((await runLine('p() { echo hi | wc -c; }', ctx)).code).toBe(0)
     expect((await runLine('p', ctx)).stdout).toBe('      3\n')
 
-    expect((await runLine("save() { echo note > /tmp/ada/f.txt; }", ctx)).code).toBe(0)
+    expect((await runLine("save() { echo note > /home/ada/f.txt; }", ctx)).code).toBe(0)
     const saved = await runLine('save', ctx)
     expect(saved.code).toBe(0)
-    expect(fs.read(ctx.user, '/tmp/ada/f.txt').content).toBe('note\n')
+    expect(fs.read(ctx.user, '/home/ada/f.txt').content).toBe('note\n')
 
     expect((await runLine('outer() { inner x; }', ctx)).code).toBe(0)
     expect((await runLine('inner() { echo "inner $1"; }', ctx)).code).toBe(0)
@@ -347,10 +338,10 @@ describe('shell', () => {
     expect((await runLine('caps() { echo shout; }', ctx)).code).toBe(0)
     expect((await runLine('caps | grep shout', ctx)).stdout).toBe('shout\n')
 
-    const redirected = await runLine('caps > /tmp/ada/said.txt', ctx)
+    const redirected = await runLine('caps > /home/ada/said.txt', ctx)
     expect(redirected.code).toBe(0)
     expect(redirected.stdout ?? '').toBe('')
-    expect(fs.read(ctx.user, '/tmp/ada/said.txt').content).toBe('shout\n')
+    expect(fs.read(ctx.user, '/home/ada/said.txt').content).toBe('shout\n')
   })
 
   it('stops recursion at the documented depth', async () => {
@@ -427,14 +418,14 @@ describe('shell', () => {
     expect(piped.code).toBe(0)
     expect(piped.stdout).toBe('hello\n')
 
-    expect((await runLine("echo 'from file' > /tmp/ada/in.txt", ctx)).code).toBe(0)
-    const redirected = await runLine('upper < /tmp/ada/in.txt', ctx)
+    expect((await runLine("echo 'from file' > /home/ada/in.txt", ctx)).code).toBe(0)
+    const redirected = await runLine('upper < /home/ada/in.txt', ctx)
     expect(redirected.code).toBe(0)
     expect(redirected.stdout).toBe('from file\n')
   })
 
   it('prints a front page whose paths are links to commands', async () => {
-    const { ctx } = boot()
+    const { ctx } = boot({ user: ownerUser })
     const out = (await runLine('index', ctx)).stdout ?? ''
     expect(out).toContain('/home/owner/notes')
     expect(out).toContain('guestbook')
@@ -452,9 +443,9 @@ describe('shell', () => {
     expect(piped.stdout ?? '').not.toContain('\x1b]8;;')
     expect(piped.stdout?.trim()).toBe('1')
 
-    const saved = await runLine('ls /home/owner > /tmp/ada/list.txt', ctx)
+    const saved = await runLine('ls /home/owner > /home/ada/list.txt', ctx)
     expect(saved.code).toBe(0)
-    expect(fs.read(ctx.user, '/tmp/ada/list.txt').content).not.toContain('\x1b]8;;')
+    expect(fs.read(ctx.user, '/home/ada/list.txt').content).not.toContain('\x1b]8;;')
 
     const listed = await runLine('ls /home/owner', ctx)
     expect(listed.stdout).toContain('\x1b]8;;cmd:')
@@ -475,8 +466,8 @@ describe('shell', () => {
     expect(plain).toContain('about.md')
 
     // An unknown extension still gets a glyph, so every column starts at the same cell.
-    await runLine('echo x > /tmp/ada/page.log', ctx)
-    const mixed = (await runLine('ls /tmp/ada', ctx)).stdout ?? ''
+    await runLine('echo x > /home/ada/page.log', ctx)
+    const mixed = (await runLine('ls /home/ada', ctx)).stdout ?? ''
     expect(mixed).toContain('🧾 page.log')
   })
 
@@ -541,7 +532,7 @@ describe('shell', () => {
   })
 
   it('links every line of a tree, and keeps the link out of a pipe and a file', async () => {
-    const { ctx, fs } = boot()
+    const { ctx, fs } = boot({ user: ownerUser })
     const tree = (await runLine('tree -L 1', ctx)).stdout ?? ''
     expect(tree).toContain('\x1b]8;;cmd:')
     // A directory opens as a listing, a markdown page in the reader, a plain file with cat.
@@ -552,14 +543,14 @@ describe('shell', () => {
     expect(piped).not.toContain('\x1b]8;;')
     expect(piped.trim()).toBe('3')
 
-    expect((await runLine('tree -L 1 > /tmp/ada/t.txt', ctx)).code).toBe(0)
-    expect(fs.read(ctx.user, '/tmp/ada/t.txt').content).not.toContain('\x1b]8;;')
+    expect((await runLine('tree -L 1 > /home/owner/t.txt', ctx)).code).toBe(0)
+    expect(fs.read(ctx.user, '/home/owner/t.txt').content).not.toContain('\x1b]8;;')
   })
 
   it('never trusts a link that came from a file', async () => {    const { ctx } = boot()
     const forged = `\x1b]8;;cmd:rm -rf /home/owner\x1b\\click me\x1b]8;;\x1b\\`
-    expect((await runLine(`echo '${forged}' > /tmp/ada/evil.txt`, ctx)).code).toBe(0)
-    const printed = (await runLine('cat /tmp/ada/evil.txt', ctx)).stdout ?? ''
+    expect((await runLine(`echo '${forged}' > /home/ada/evil.txt`, ctx)).code).toBe(0)
+    const printed = (await runLine('cat /home/ada/evil.txt', ctx)).stdout ?? ''
     expect(printed).toContain('click me')
     expect(printed).not.toContain('cmd:')
   })
@@ -567,8 +558,8 @@ describe('shell', () => {
   it('never trusts a motion marker that came from a file', async () => {
     const { ctx } = boot()
     const forged = `\x1b]5522;type;30\x1b\\slow`
-    expect((await runLine(`echo '${forged}' > /tmp/ada/slow.txt`, ctx)).code).toBe(0)
-    const printed = (await runLine('cat /tmp/ada/slow.txt', ctx)).stdout ?? ''
+    expect((await runLine(`echo '${forged}' > /home/ada/slow.txt`, ctx)).code).toBe(0)
+    const printed = (await runLine('cat /home/ada/slow.txt', ctx)).stdout ?? ''
     expect(printed).toContain('slow')
     expect(printed).not.toContain('5522')
   })
@@ -576,14 +567,14 @@ describe('shell', () => {
   it('marks a page printed by cat as prose, and leaves listings monospace', async () => {
     const { ctx } = boot()
     expect((await runLine('cat /home/owner/about.md', ctx)).prose).toBe(true)
-    await runLine('echo page > /tmp/ada/page.txt', ctx)
-    expect((await runLine('cat /tmp/ada/page.txt', ctx)).prose).toBe(true)
+    await runLine('echo page > /home/ada/page.txt', ctx)
+    expect((await runLine('cat /home/ada/page.txt', ctx)).prose).toBe(true)
     expect((await runLine('cat /home/owner/about.md /etc/hostname', ctx)).prose).toBeUndefined()
     expect((await runLine('ls /home/owner', ctx)).prose).toBeUndefined()
   })
 
   it('prints the front page at once, without a typing region', async () => {
-    const { ctx } = boot()
+    const { ctx } = boot({ user: ownerUser })
     const out = (await runLine('index', ctx)).stdout ?? ''
     expect(out).not.toContain('\x1b]5522')
   })
@@ -614,7 +605,7 @@ describe('shell', () => {
   })
 
   it('expands globs, aliases and echo escapes', async () => {
-    const { ctx } = boot()
+    const { ctx } = boot({ user: ownerUser })
     const globbed = await runLine('echo *.md', ctx)
     expect(globbed.stdout).toContain('about.md')
     const nested = await runLine('echo notes/*.md', ctx)
@@ -630,10 +621,10 @@ describe('shell', () => {
     expect((await runLine('cd /root', guest.ctx)).code).toBe(1)
     expect((await runLine('chmod 600 /home/owner/about.md', guest.ctx)).stderr).toContain('Permission denied')
     expect((await runLine('chown ada /tmp/ada', guest.ctx)).code).toBe(1)
-    expect((await runLine('echo hi > /tmp/ada/a.txt', guest.ctx)).code).toBe(0)
-    expect((await runLine('chmod 000 /tmp/ada/a.txt', guest.ctx)).code).toBe(0)
-    expect((await runLine('cat /tmp/ada/a.txt', guest.ctx)).code).toBe(1)
-    expect(guest.fs.read(root, '/tmp/ada/a.txt').content).toBe('hi\n')
+    expect((await runLine('echo hi > /home/ada/a.txt', guest.ctx)).code).toBe(0)
+    expect((await runLine('chmod 000 /home/ada/a.txt', guest.ctx)).code).toBe(0)
+    expect((await runLine('cat /home/ada/a.txt', guest.ctx)).code).toBe(1)
+    expect(guest.fs.read(root, '/home/ada/a.txt').content).toBe('hi\n')
 
     const owned = boot({ user: root })
     expect((await runLine('chmod 600 /home/owner/about.md', owned.ctx)).code).toBe(0)
@@ -642,7 +633,7 @@ describe('shell', () => {
     expect((await runLine('chown ada:readers /home/owner/about.md', owned.ctx)).code).toBe(0)
     expect(owned.fs.stat(root, '/home/owner/about.md').gid).toBe('readers')
 
-    const { ctx, fs } = boot()
+    const { ctx, fs } = boot({ user: ownerUser })
     // Colour and glyphs are the default; -n is the plain form (names still link).
     const plain = await runLine('tree -n -L 1', ctx)
     expect(stripLinks(plain.stdout ?? '')).toBe('.\n|-- about.md\n`-- notes\n')

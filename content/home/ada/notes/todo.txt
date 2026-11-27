@@ -1,0 +1,6 @@
+ada's notes
+
+- someone left a warning in /var/guestbook. read it.
+- `id` says I am in readers. So /srv/reading-room should open.
+- `ip` and `ss` exist. I did not know this machine had a web server.
+- if a key is found, `chmod 600` it before ssh complains.

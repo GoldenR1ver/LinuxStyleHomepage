@@ -1,38 +1,22 @@
 import type { User } from './types'
+import { hasCap } from './caps'
 import { normalize } from './path'
 
 /**
- * Two checks, both required for a guest write:
- * the mode bits below, and the site zones in canWrite.
- * Root skips the mode bits. Root writes outside /tmp are published.
+ * The POSIX permission check: owner, then a supplementary group, then other.
+ * A process holding CAP_DAC_OVERRIDE skips the bits, which is how root gets its
+ * power without a special case here.
  */
 export function modePermits(
   user: User,
   node: { mode: number; uid: string; gid: string },
   bit: 1 | 2 | 4,
 ): boolean {
-  if (user.role === 'root') return true
+  if (hasCap(user, 'CAP_DAC_OVERRIDE')) return true
   const owner = node.uid === user.name
-  const group = !owner && node.gid === user.name
+  const group = !owner && user.groups.includes(node.gid)
   const klass = owner ? node.mode >> 6 : group ? node.mode >> 3 : node.mode
   return (klass & bit) !== 0
-}
-
-/** Where a guest may create or change a file. Root may write anywhere. */
-export function canWrite(user: User, path: string): boolean {
-  if (user.role === 'root') return true
-  const p = normalize(path)
-  const scratch = `/tmp/${user.name}`
-  if (p === scratch || p.startsWith(`${scratch}/`)) return true
-  if (p.startsWith('/var/guestbook/')) return true
-  return false
-}
-
-/** Root edits under /tmp stay in the browser. Every other root write is published. */
-export function publishes(user: User, path: string): boolean {
-  if (user.role !== 'root') return false
-  const p = normalize(path)
-  return p !== '/tmp' && !p.startsWith('/tmp/')
 }
 
 export function isGuestbook(path: string): boolean {
@@ -41,16 +25,21 @@ export function isGuestbook(path: string): boolean {
 
 /** Mode of a file shipped in the site image. */
 export function shippedMode(path: string, kind: 'file' | 'dir'): number {
+  if (path === '/proc' || path.startsWith('/proc/')) return kind === 'dir' ? 0o555 : 0o444
   if (path === '/tmp' || path === '/var/guestbook') return 0o1777
   if (path === '/root' || path.startsWith('/root/')) return kind === 'dir' ? 0o700 : 0o600
-  if (path.startsWith('/tmp/')) return kind === 'dir' ? 0o700 : 0o600
+  if (path.startsWith('/tmp/')) return kind === 'dir' ? 0o1777 : 0o644
+  if (path === '/etc/shadow' || path === '/etc/gshadow') return 0o600
   return kind === 'dir' ? 0o755 : 0o644
 }
 
-/** Mode of a file created in this browser. Scratch stays private. */
-export function createdMode(path: string, kind: 'file' | 'dir'): number {
-  if (path.startsWith('/tmp/')) return kind === 'dir' ? 0o700 : 0o600
-  return kind === 'dir' ? 0o755 : 0o644
+/**
+ * Mode of a new file or directory, from the requested bits and the umask.
+ * The default umask is 022, so a directory is 0755 and a file 0644.
+ */
+export function createdMode(kind: 'file' | 'dir', umask = 0o022): number {
+  const wanted = kind === 'dir' ? 0o777 : 0o666
+  return wanted & ~umask & 0o777
 }
 
 export function formatMode(type: 'file' | 'dir', mode: number): string {

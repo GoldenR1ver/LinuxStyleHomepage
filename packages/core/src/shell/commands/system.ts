@@ -1,6 +1,10 @@
-import { homeDir } from '../../kernel/auth'
+import { formatCaps, hasCap } from '../../kernel/caps'
+import { homeDir, lookupUser, parseGroup, readAccounts, setPassword, verifyPassword } from '../../kernel/accounts'
+import type { MountRow } from '../../kernel/proc'
+import { mountTable } from '../../app/system'
+import type { User } from '../../kernel/types'
 import { FsError } from '../../kernel/vfs'
-import type { ShellCtx } from '../context'
+import type { CommandResult, ShellCtx } from '../context'
 import type { CommandSpec } from './types'
 import { resolvePath } from './helpers'
 
@@ -16,12 +20,22 @@ export const systemCommands: CommandSpec[] = [
   {
     name: 'id',
     group: 'system',
-    summary: 'print user id',
-    usage: 'id',
-    manual: 'root is 0. Guests are 1000. This is a label, not a credential.',
-    run: (ctx) => {
-      const id = ctx.user.role === 'root' ? 0 : 1000
-      return { code: 0, stdout: `uid=${id}(${ctx.user.name}) gid=${id}(${ctx.user.name})\n` }
+    summary: 'print user and group ids',
+    usage: 'id [user]',
+    manual: 'Print the uid, the primary gid and every group of this pane, the way id(1) does.',
+    run(ctx, args) {
+      if (args.length > 1) throw new FsError('EINVAL', 'too many arguments')
+      const user = args[0] ? lookupUser(ctx.rt.fs, args[0] ?? '') : ctx.user
+      if (!user) return { code: 1, stderr: `id: '${args[0]}': no such user\n` }
+      const { groups } = readAccounts(ctx.rt.fs)
+      const rows = user.groups.map((name) => {
+        const gid = groups.find((group) => group.name === name)?.gid ?? user.gid
+        return `${gid}(${name})`
+      })
+      return {
+        code: 0,
+        stdout: `uid=${user.uid}(${user.name}) gid=${user.gid}(${user.groups[0] ?? user.name}) groups=${rows.join(',')}\n`,
+      }
     },
   },
   {
@@ -81,7 +95,7 @@ export const systemCommands: CommandSpec[] = [
     group: 'system',
     summary: 'print the environment',
     usage: 'env',
-    manual: 'Print this pane\'s environment.',
+    manual: "Print this pane's environment.",
     run: (ctx) => ({ code: 0, stdout: formatEnv(ctx.env) }),
   },
   {
@@ -275,15 +289,97 @@ export const systemCommands: CommandSpec[] = [
   {
     name: 'df',
     group: 'system',
-    summary: 'where data lives',
-    usage: 'df',
-    manual: 'There is no disk. This reports the local overlay and whether GitHub is authenticated.',
-    run(ctx) {
+    summary: 'show mounted filesystems and their use',
+    usage: 'df [-h]',
+    manual: 'Read `/proc/mounts` and report each mount. The overlay is the image plus this browser; /tmp is a tmpfs; /proc stores nothing.',
+    run(ctx, args) {
+      for (const arg of args) if (arg !== '-h' && arg !== '--human-readable') throw new FsError('EINVAL', `invalid option -- ${arg}`)
+      const mounts = mountsOf(ctx)
       const usage = ctx.rt.fs.usage()
-      const remote = ctx.rt.remote.authenticated ? 'github authenticated' : ctx.rt.remote.configured ? 'github anonymous' : 'github off'
+      const rows = ['Filesystem      Type     Size  Used  Mounted on']
+      for (const row of mounts) {
+        // Only the writable overlay has bytes to count; the rest are generated.
+        const used = row.type === 'overlay' ? human(usage.bytes) : '0'
+        const size = row.type === 'overlay' ? '1.0G' : row.type === 'tmpfs' ? '64M' : '0'
+        rows.push(`${row.device.padEnd(15)} ${row.type.padEnd(8)} ${size.padStart(4)}  ${used.padStart(4)}  ${row.dir}`)
+      }
+      if (mounts.some((row) => row.type === 'overlay')) {
+        rows.push('', `${usage.files} files in the browser overlay`)
+      }
+      return { code: 0, stdout: `${rows.join('\n')}\n` }
+    },
+  },
+  {
+    name: 'mount',
+    group: 'system',
+    summary: 'list mounted filesystems',
+    usage: 'mount',
+    manual: 'Print `/proc/mounts`, the table that describes the three kinds of path this machine has.',
+    run(ctx) {
+      const rows = readProc(ctx, '/proc/mounts')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const [device, dir, type, options] = line.split(/\s+/)
+          return `${device} on ${dir} type ${type} (${options})`
+        })
+      return { code: 0, stdout: `${rows.join('\n')}\n` }
+    },
+  },
+  {
+    name: 'free',
+    group: 'system',
+    summary: 'show memory use',
+    usage: 'free [-h]',
+    manual: 'Read `/proc/meminfo`. The memory is the page the terminal runs on.',
+    run(ctx, args) {
+      for (const arg of args) if (arg !== '-h') throw new FsError('EINVAL', `invalid option -- ${arg}`)
+      const info = readProc(ctx, '/proc/meminfo')
+      const value = (key: string) => Number(/(\d+)/.exec(info.split('\n').find((line) => line.startsWith(key)) ?? '')?.[1] ?? 0)
+      const total = value('MemTotal')
+      const free = value('MemFree')
+      const rows = [
+        '              total    used    free',
+        `Mem:      ${kb(total).padStart(8)}${kb(total - free).padStart(8)}${kb(free).padStart(8)}`,
+        `Swap:     ${'0B'.padStart(8)}${'0B'.padStart(8)}${'0B'.padStart(8)}`,
+      ]
+      return { code: 0, stdout: `${rows.join('\n')}\n` }
+    },
+  },
+  {
+    name: 'umask',
+    group: 'system',
+    summary: 'set the file creation mask',
+    usage: 'umask [octal]',
+    manual:
+      'With no argument, print the mask. With an octal value, set it: new files are 0666 and new directories 0777, minus the mask. The default is 022.',
+    run(ctx, args) {
+      if (args.length > 1) throw new FsError('EINVAL', 'too many arguments')
+      const current = ctx.rt.fs.mask()
+      const arg = (args[0] ?? '').trim()
+      if (!arg) return { code: 0, stdout: `0${current.toString(8).padStart(3, '0')}\n` }
+      if (!/^[0-7]{1,3}$/.test(arg)) throw new FsError('EINVAL', `invalid mask: ${arg}`)
+      ctx.rt.fs.setUmask(Number.parseInt(arg, 8))
+      return { code: 0 }
+    },
+  },
+  {
+    name: 'capsh',
+    group: 'system',
+    summary: 'print the capabilities of an account',
+    usage: 'capsh [--print] [user]',
+    manual:
+      'Print the capability set this pane carries. uid 0 holds all of them; any other account holds only what /etc/caps grants it. This is the mechanism that replaced "root may do anything".',
+    run(ctx, args) {
+      const rest = args.filter((arg) => arg !== '--print' && arg !== '--decode')
+      if (rest.length > 1) throw new FsError('EINVAL', 'too many arguments')
+      const user = rest[0] ? lookupUser(ctx.rt.fs, rest[0]) : ctx.user
+      if (!user) return { code: 1, stderr: `capsh: ${rest[0]}: no such user\n` }
+      const body = formatCaps(user)
       return {
         code: 0,
-        stdout: `browser overlay  ${usage.files} files  ${usage.bytes} bytes\n${remote}\n`,
+        stdout: `Current: uid=${user.uid}(${user.name})\n${body}\n`,
       }
     },
   },
@@ -305,25 +401,119 @@ export const systemCommands: CommandSpec[] = [
     group: 'system',
     summary: 'switch user',
     usage: 'su [user]',
-    manual: 'su and su root ask for the root password. root can become any guest without a password. Only this pane changes.',
+    manual:
+      'Ask for the target account\'s password, the way su(1) does. A process holding CAP_SETUID may become any account without one. Only this pane changes.',
     async run(ctx, args) {
       if (args.length > 1) throw new FsError('EINVAL', 'too many arguments')
       const name = args[0] || 'root'
-      if (name === 'root' || name.toLowerCase() === 'root') {
+      const target = lookupUser(ctx.rt.fs, name)
+      if (!target) return { code: 1, stderr: `su: user ${name} does not exist\n` }
+      if (!hasCap(ctx.user, 'CAP_SETUID')) {
         const password = await ctx.host.askSecret('Password: ')
         if (password === null) return { code: 130 }
-        if (password !== ctx.rt.vault.get()) return { code: 1, stderr: 'su: Authentication failure\n' }
-        become(ctx, { name: 'root', role: 'root' })
-        return { code: 0 }
+        if (!verifyPassword(ctx.rt.fs, name, password)) return { code: 1, stderr: 'su: Authentication failure\n' }
       }
-      if (ctx.user.role !== 'root') return { code: 1, stderr: 'su: Permission denied\n' }
-      if (!/^[^\s/\\:]{1,32}$/.test(name) || name === '.' || name === '..') {
-        return { code: 1, stderr: 'su: invalid user\n' }
+      become(ctx, target)
+      return { code: 0 }
+    },
+  },
+  {
+    name: 'sudo',
+    group: 'system',
+    summary: 'run a command as another user',
+    usage: 'sudo [-u user] command [args...]',
+    manual:
+      'Only a member of the wheel group may use sudo, and the command asks for that user\'s own password. root needs no password. The write rules do not change: uid 0 still ignores the mode bits.',
+    async run(ctx, args) {
+      let target = 'root'
+      const rest: string[] = []
+      const me = ctx.realUser
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i] ?? ''
+        if (arg === '-u' || arg === '--user') {
+          target = args[++i] ?? ''
+          continue
+        }
+        if (arg === '-l' || arg === '--list') {
+          const allowed = canSudo(me)
+          return {
+            code: allowed ? 0 : 1,
+            stdout: allowed ? `User ${me.name} may run any command as any user.\n` : '',
+            stderr: allowed ? '' : `${me.name} is not in the sudoers file.\n`,
+          }
+        }
+        if (arg === '--') {
+          rest.push(...args.slice(i + 1))
+          break
+        }
+        if (arg.startsWith('-') && arg !== '-') return { code: 1, stderr: `sudo: invalid option -- ${arg}\n` }
+        rest.push(arg)
       }
-      const user = { name, role: 'guest' as const }
-      const home = homeDir(user)
-      if (!ctx.rt.fs.exists(user, home)) ctx.rt.fs.mkdir(user, home, { parents: true })
-      become(ctx, user)
+      const line = rest.join(' ')
+      if (!line) return { code: 1, stderr: 'usage: sudo [-u user] command [args...]\n' }
+      if (!hasCap(me, 'CAP_SETUID')) {
+        if (!canSudo(me)) {
+          return { code: 1, stderr: `${me.name} is not in the sudoers file. This incident will be reported.\n` }
+        }
+        const password = await ctx.host.askSecret(`[sudo] password for ${me.name}: `)
+        if (password === null) return { code: 130 }
+        if (!verifyPassword(ctx.rt.fs, me.name, password)) {
+          return { code: 1, stderr: 'sudo: 1 incorrect password attempt\n' }
+        }
+      }
+      const user = lookupUser(ctx.rt.fs, target)
+      if (!user) return { code: 1, stderr: `sudo: unknown user: ${target}\n` }
+      return runAs(ctx, user, line)
+    },
+  },
+  {
+    name: 'passwd',
+    group: 'system',
+    summary: 'change a password',
+    usage: 'passwd [user]',
+    manual:
+      'Without an argument, change your own password. root may name any account. The hash is written to /etc/shadow in this browser.',
+    async     run(ctx, args) {
+      if (args.length > 1) throw new FsError('EINVAL', 'too many arguments')
+      // setuid binaries change the effective uid. `passwd` still has to know who
+      // really typed the line, the way getuid(2) does.
+      const me = ctx.realUser
+      const name = args[0] || me.name
+      const maySwitch = hasCap(me, 'CAP_SETUID')
+      if (name !== me.name && !maySwitch) {
+        return { code: 1, stderr: 'passwd: You may not view or modify password information for other users.\n' }
+      }
+      if (!lookupUser(ctx.rt.fs, name)) return { code: 1, stderr: `passwd: user '${name}' does not exist\n` }
+      if (name === me.name && !maySwitch) {
+        const current = await ctx.host.askSecret('Current password: ')
+        if (current === null) return { code: 130 }
+        if (!verifyPassword(ctx.rt.fs, name, current)) return { code: 1, stderr: 'passwd: Authentication token manipulation error\n' }
+      }
+      const first = await ctx.host.askSecret('New password: ')
+      if (first === null) return { code: 130 }
+      const second = await ctx.host.askSecret('Retype new password: ')
+      if (second === null) return { code: 130 }
+      if (!first || first !== second) return { code: 1, stderr: 'passwd: Have exhausted maximum number of retries for service\n' }
+      try {
+        // The write is made as the effective user: 0600 on /etc/shadow answers
+        // unless a setuid /bin/passwd raised it to root first.
+        setPassword(ctx.rt.fs, ctx.user, name, first)
+      } catch (err) {
+        return { code: 1, stderr: `passwd: ${err instanceof Error ? err.message : String(err)}\n` }
+      }
+      return { code: 0, stdout: 'passwd: password updated successfully\n' }
+    },
+  },
+  {
+    name: 'restore',
+    group: 'system',
+    summary: 'drop this browser\'s copy of a file',
+    usage: 'restore path...',
+    manual:
+      'Delete the local overlay entry, including a tombstone, so the file shipped with the build shows through again. This is the way back from a local rm of a published file.',
+    run(ctx, args) {
+      if (!args.length) throw new FsError('EINVAL', 'missing operand')
+      for (const input of args) ctx.rt.fs.restorePath(ctx.user, resolvePath(ctx, input))
       return { code: 0 }
     },
   },
@@ -353,8 +543,61 @@ export const systemCommands: CommandSpec[] = [
   },
 ]
 
-function formatEnv(env: Record<string, string>): string {
-  return `${Object.keys(env)
+/** The sudoers rule in this build: membership of wheel, checked by name. */
+function canSudo(user: User): boolean {
+  return user.uid === 0 || user.groups.includes('wheel')
+}
+
+async function runAs(ctx: ShellCtx, user: User, line: string): Promise<CommandResult> {
+  const previous = ctx.user
+  const previousReal = ctx.realUser
+  const env = { ...ctx.env }
+  become(ctx, user)
+  try {
+    if (!ctx.reexec) return { code: 1, stderr: 'sudo: the shell cannot run a command here\n' }
+    return await ctx.reexec(line)
+  } finally {
+    ctx.user = previous
+    ctx.realUser = previousReal
+    ctx.env = env
+  }
+}
+
+/** Read a `/proc` file; the synthetic tree answers without touching the overlay. */
+function readProc(ctx: ShellCtx, path: string): string {
+  const node = ctx.rt.fs.read(ctx.user, path)
+  return node.encoding === 'utf8' ? node.content : ''
+}
+
+/** The mount table, preferring `/proc/mounts` so the two never disagree. */
+function mountsOf(ctx: ShellCtx): MountRow[] {
+  try {
+    const rows = readProc(ctx, '/proc/mounts')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [device, dir, type, ...rest] = line.split(/\s+/)
+        return { device: device ?? '', dir: dir ?? '', type: type ?? '', options: rest.slice(0, -2).join(',') }
+      })
+    if (rows.length) return rows
+  } catch {
+    /* a filesystem without /proc still has a table */
+  }
+  return mountTable()
+}
+
+function human(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}K`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}M`
+}
+
+function kb(bytes: number): string {
+  return `${(bytes / 1024).toFixed(0)}M`
+}
+
+function formatEnv(env: Record<string, string>): string {  return `${Object.keys(env)
     .sort()
     .map((key) => `${key}=${env[key] ?? ''}`)
     .join('\n')}\n`
@@ -381,9 +624,16 @@ function du(ctx: ShellCtx, path: string): number {
   return names.reduce((sum, name) => sum + du(ctx, `${path === '/' ? '' : path}/${name}`), 0)
 }
 
-function become(ctx: ShellCtx, user: ShellCtx['user']) {
+function become(ctx: ShellCtx, user: User) {
   ctx.user = user
+  ctx.realUser = user
   ctx.env.USER = user.name
   ctx.env.LOGNAME = user.name
   ctx.env.HOME = homeDir(user)
+}
+
+/** Kept for tests that read a node's group through the shell. */
+export function groupFile(ctx: ShellCtx): ReturnType<typeof parseGroup> {
+  const node = ctx.rt.fs.read(ctx.user, '/etc/group')
+  return parseGroup(node.content)
 }

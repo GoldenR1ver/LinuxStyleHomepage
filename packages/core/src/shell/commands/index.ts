@@ -1,6 +1,7 @@
 import { padEndDisplay } from '../../kernel/text'
 import type { CommandResult } from '../context'
 import { fileCommands } from './fs'
+import { netCommands } from './net'
 import { siteCommands } from './site'
 import { systemCommands } from './system'
 import { textCommands } from './text'
@@ -12,7 +13,7 @@ import type { CommandSpec } from './types'
  * Add a command by appending one entry in the matching group file.
  * help, man, and tab completion all read this table.
  */
-const specs: CommandSpec[] = [...fileCommands, ...textCommands, ...systemCommands, ...siteCommands, ...viewCommands].map(wrap)
+const specs: CommandSpec[] = [...fileCommands, ...textCommands, ...systemCommands, ...netCommands, ...siteCommands, ...viewCommands].map(wrap)
 for (const spec of metaCommands(specs)) specs.push(wrap(spec))
 
 const map = new Map<string, CommandSpec>()
@@ -61,14 +62,7 @@ const labels = [
   ['site', 'site'],
 ] as const
 
-const GUIDE = `home
-
-[1;36mTry to use 'cat /home/owner/about.txt' to read the about page.
-
-Click a path to open it: a directory lists, a .md renders, a .pdf opens, a text file prints.
-'index' prints the map again. Any key skips a playing animation.[0m
-
-Pages
+const GUIDE = `Pages
   [1;33m/home/owner[0m                     about, projects, notes, resume
   cat about.txt                   
   vim about.txt                   
@@ -116,13 +110,20 @@ Ctrl-b, then
   %                           split left/right
   "                           split up/down
   arrows or hjkl              move
+  Alt+arrows                  resize the pane
   x                           close pane
   c                           new window
+  &                           close window
   n / p                       next / previous window
   0-9                         select window
+  tmux list-windows           the same table from the shell
 
-Root
-  github auth                 token stays in this browser
+Accounts
+  id                          your uid and groups
+  su [user]                   switch user, asks the target password
+  sudo -u root command        wheel only, asks your own password
+  ssh -i key root@127.0.0.1   log in with a private key
+  ip / ss                     addresses and listening sockets
 
 man <command> prints a longer description.
 
@@ -135,7 +136,8 @@ function metaCommands(all: CommandSpec[]): CommandSpec[] {
       group: 'site',
       summary: 'site guide and commands',
       usage: 'help [command]',
-      manual: 'With no argument, prints how to read the site and the command list.',
+      manual:
+        'Opens the guide in the pager: space or f pages down, b pages up, j/k move, g/G jump, q quits. A command name prints just that entry.',
       run(_ctx, args) {
         const name = args[0]
         if (name) {
@@ -143,14 +145,17 @@ function metaCommands(all: CommandSpec[]): CommandSpec[] {
           if (!spec) return { code: 1, stderr: `help: ${name}: not found\n` }
           return { code: 0, stdout: `${spec.name} - ${spec.summary}\n  ${spec.usage}\n\n${spec.manual}\n` }
         }
-        const quickStart = `\x1b[34mQuick Start
+        const intro = `\x1b[1mhome\x1b[0m  a site you read through a shell.
+Files, notes, a guestbook, and a resume. Every path printed here is a link: a folder lists, a page opens.
+
+\x1b[34mQuick Start
 - Type 'index' to see the map again. Every path is clickable.
 - Type 'ls' to see the files and folders in this path.
 - Type 'cat about.txt' to read the introduction to this page.
 - Type 'pdf me.pdf' to see my resume.
 - Type 'cd /home/owner/works/projects' to see all my projects.
-- Type 'help' for more information.\x1b[0m`
-        const lines = [quickStart, '', GUIDE.trimEnd(), '', 'Commands', '']
+- Type 'help <command>' for one entry, 'man <command>' for the long form.\x1b[0m`
+        const lines = [intro, '', GUIDE.trimEnd(), '', 'Commands', '']
         for (const [group, label] of labels) {
           lines.push(label)
           for (const spec of all.filter((item) => item.group === group)) {
@@ -158,7 +163,8 @@ function metaCommands(all: CommandSpec[]): CommandSpec[] {
           }
           lines.push('')
         }
-        return { code: 0, stdout: `${lines.join('\n').trimEnd()}\n` }
+        // The first screen is the introduction; space opens the guide and the command list.
+        return { code: 0, pager: `${lines.join('\n').trimEnd()}\n` }
       },
     },
     {

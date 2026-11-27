@@ -1,0 +1,14 @@
+# Build-time ownership. The build stores bytes, not metadata, so this table is
+# applied once at boot, after /etc/passwd has decided who owns each home.
+# path                 owner:group    mode
+# The public home stays readable; every other home defaults to 0700.
+/home/owner            owner:staff    0755
+/srv/reading-room      root:readers   0750
+/srv/reading-room/README.txt root:readers 0640
+/var/backups           root:root      0755
+/var/backups/shadow.bak root:root     0644
+/var/log/auth.log      root:root      0644
+/root/backup/id_rsa    root:root      0600
+# A real setuid root binary. `passwd` writes /etc/shadow (0600) only because
+# exec of this file raises the effective uid to 0.
+/bin/passwd            root:root      4755

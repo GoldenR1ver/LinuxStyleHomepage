@@ -8,6 +8,11 @@ import type { ShellCtx } from './context'
  * The work tree is this browser's guestbook files and this user's scratch.
  * Published pages can be mentioned. Their bytes are not attached.
  */
+/** Every root a letter may read from: the guestbook, this home, and scratch. */
+function worktreeRoots(user: User): string[] {
+  return ['/var/guestbook', user.home, `/tmp/${user.name}`].filter(Boolean)
+}
+
 export function isWorktreePath(user: User, path: string): boolean {
   let p: string
   try {
@@ -15,9 +20,7 @@ export function isWorktreePath(user: User, path: string): boolean {
   } catch {
     return false
   }
-  if (p !== '/var/guestbook' && isInside('/var/guestbook', p)) return true
-  const scratch = `/tmp/${user.name}`
-  return p !== scratch && isInside(scratch, p)
+  return worktreeRoots(user).some((root) => p !== root && isInside(root, p))
 }
 
 export function stageSavedGuestbook(ctx: ShellCtx, path: string): string {
@@ -193,8 +196,7 @@ export function unstagePath(ctx: ShellCtx, input: string): { lines: string[]; er
 
 /** A directory is in the work tree when it contains, or sits inside, a work-tree root. */
 function touchesWorktree(user: User, dir: string): boolean {
-  const roots = ['/var/guestbook', `/tmp/${user.name}`]
-  return roots.some((root) => isInside(root, dir) || isInside(dir, root))
+  return worktreeRoots(user).some((root) => isInside(root, dir) || isInside(dir, root))
 }
 
 function safeNormalize(value: string): string {
@@ -269,7 +271,7 @@ function addNote(draft: MailDraft, about: string, body: string): 'added' | 'full
 
 function localTexts(fs: VirtualFS): Map<string, string> {
   const map = new Map<string, string>()
-  for (const [path, entry] of fs.exportLayer('local')) {
+  for (const [path, entry] of fs.exportLayer()) {
     if (entry.type === 'file' && entry.encoding === 'utf8') map.set(path, entry.content)
   }
   return map

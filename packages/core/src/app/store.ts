@@ -4,12 +4,14 @@ import type { MailDraft } from '../remote/outbox'
 /**
  * The persistence port. A host supplies one: the browser uses IndexedDB, a Node
  * host uses a file, a test uses memoryStore. Nothing here touches a platform API.
+ *
+ * v2 dropped the `remote` layer. v1 saves are read by the browser host, which
+ * folds their remote entries into the local overlay before loading it here.
  */
 export interface Persisted {
-  v: 1
-  remote: [string, Entry][]
+  v: 2
   local: [string, Entry][]
-  /** Draft subject and paths. Absent in saves from before mail. */
+  /** Draft subject and paths. */
   outbox?: MailDraft
 }
 

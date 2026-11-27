@@ -1,0 +1,11 @@
+Nov 20 03:02:11 home systemd[1]: Started Home Linux httpd.
+Nov 20 03:02:11 home httpd[812]: listening on 127.0.0.1:8080
+Nov 20 03:02:11 home httpd[812]: WARNING: document root is /, not /srv/http
+Nov 20 03:02:11 home httpd[812]: WARNING: running as root, so the mode bits do not apply
+Nov 20 03:07:45 home sshd[2011]: Failed password for root from 192.168.1.77 port 51422 ssh2
+Nov 20 03:07:46 home sshd[2011]: Failed password for root from 192.168.1.77 port 51422 ssh2
+Nov 20 03:11:42 home sshd[2041]: Accepted password for ada from 192.168.1.77 port 51430 ssh2
+Nov 20 03:12:03 home sshd[2041]: pam_unix(sshd:session): session opened for user ada(uid=1001)
+Nov 20 03:19:10 home httpd[812]: GET /root/backup/ 200 61 "-" "curl/8.4.0"
+Nov 20 03:19:22 home httpd[812]: GET /root/backup/id_rsa 200 1679 "-" "curl/8.4.0"
+Nov 20 03:19:40 home sshd[2066]: Accepted publickey for root from 127.0.0.1 port 41566 ssh2

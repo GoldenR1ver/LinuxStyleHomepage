@@ -1,4 +1,5 @@
-import { applyMode, canWrite, formatMode } from '../../kernel/policy'
+import { lookupUser, parseGroup } from '../../kernel/accounts'
+import { applyMode, formatMode } from '../../kernel/policy'
 import { basename, isInside } from '../../kernel/path'
 import { displayWidth, padEndDisplay } from '../../kernel/text'
 import { FsError } from '../../kernel/vfs'
@@ -336,11 +337,8 @@ export const fileCommands: CommandSpec[] = [
       const dest = resolvePath(ctx, destArg)
       const destStat = ctx.rt.fs.stat(ctx.user, dest)
       if (destStat.type !== 'dir') throw new FsError('ENOTDIR', `${destArg}: Not a directory`)
-      if (!canWrite(ctx.user, joinPath(dest, 'upload'))) {
-        throw new FsError(
-          'EACCES',
-          `Permission denied. Guests upload only under /var/guestbook or /tmp/${ctx.user.name}.`,
-        )
+      if (!ctx.rt.fs.allows(ctx.user, dest, 2) || !ctx.rt.fs.allows(ctx.user, dest, 1)) {
+        throw new FsError('EACCES', `${destArg}: Permission denied`)
       }
       const picked = await ctx.host.pickFiles({ multiple: true })
       if (picked === null) return { code: 130, stderr: 'scp: cancelled\n' }
@@ -423,12 +421,24 @@ export const fileCommands: CommandSpec[] = [
     group: 'file',
     summary: 'change owner and group',
     usage: 'chown user[:group] path...',
-    manual: 'Root only. The group is a name, the same string ls -l and tree -g print. There is no separate group account.',
+    manual:
+      'Root only. The user must exist in /etc/passwd and the group in /etc/group, the same names ls -l and tree -g print.',
     run(ctx, args) {
       if (args.length < 2) throw new FsError('EINVAL', 'missing operand')
       const spec = args[0] ?? ''
       const owner = parseOwner(spec)
-      for (const file of args.slice(1)) ctx.rt.fs.chown(ctx.user, resolvePath(ctx, file), owner.user, owner.group)
+      if (owner.user && !lookupUser(ctx.rt.fs, owner.user)) {
+        throw new FsError('EINVAL', `invalid user: '${owner.user}'`)
+      }
+      if (owner.group !== null) {
+        const groups = parseGroup(readGroupFile(ctx))
+        if (!groups.some((group) => group.name === owner.group)) {
+          throw new FsError('EINVAL', `invalid group: '${owner.group}'`)
+        }
+      }
+      for (const file of args.slice(1)) {
+        ctx.rt.fs.chown(ctx.user, resolvePath(ctx, file), owner.user, owner.group)
+      }
       return { code: 0 }
     },
   },
@@ -821,6 +831,15 @@ function parseMode(current: number, spec: string): number {
     return applyMode(current, spec)
   } catch {
     throw new FsError('EINVAL', `invalid mode ${spec}`)
+  }
+}
+
+function readGroupFile(ctx: ShellCtx): string {
+  try {
+    const node = ctx.rt.fs.read(ctx.user, '/etc/group')
+    return node.encoding === 'utf8' ? node.content : ''
+  } catch {
+    return ''
   }
 }
 

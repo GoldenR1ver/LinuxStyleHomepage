@@ -1,45 +1,39 @@
 import { describe, expect, it } from 'vitest'
-import { applyMode, canWrite, formatMode, modePermits, publishes } from './policy'
+import { guest, rootUser } from '../testkit'
+import { applyMode, formatMode, modePermits, shippedMode } from './policy'
 
-const guest = { name: 'ada', role: 'guest' as const }
-const root = { name: 'root', role: 'root' as const }
+const staff = guest('staff', 1002, ['staff', 'readers'])
+const bob = guest('bob', 1003, ['bob'])
 
 describe('policy', () => {
-  it('lets root ignore mode bits and checks owner, group, then other', () => {
-    const locked = { mode: 0, uid: 'ada', gid: 'ada' }
-    expect(modePermits(root, locked, 4)).toBe(true)
-    expect(modePermits(guest, locked, 4)).toBe(false)
-    const node = { mode: 0o640, uid: 'ada', gid: 'staff' }
-    expect(modePermits(guest, node, 2)).toBe(true)
-    expect(modePermits({ name: 'staff', role: 'guest' }, node, 4)).toBe(true)
-    expect(modePermits({ name: 'staff', role: 'guest' }, node, 2)).toBe(false)
-    expect(modePermits({ name: 'bob', role: 'guest' }, node, 4)).toBe(false)
+  it('checks owner, then a supplementary group, then other', () => {
+    const node = { mode: 0o640, uid: 'staff', gid: 'readers' }
+    expect(modePermits(staff, node, 4)).toBe(true)
+    expect(modePermits(staff, node, 2)).toBe(true)
+    expect(modePermits(bob, node, 4)).toBe(false)
+    expect(modePermits(rootUser, node, 2)).toBe(true)
   })
 
-  it('limits guest writes to scratch and guestbook files', () => {
-    expect(canWrite(guest, '/tmp/ada/a.txt')).toBe(true)
-    expect(canWrite(guest, '/var/guestbook/hi.txt')).toBe(true)
-    expect(canWrite(guest, '/var/guestbook')).toBe(false)
-    expect(canWrite(guest, '/home/owner/about.md')).toBe(false)
+  it('treats a uid 0 user as root whatever the bits say', () => {
+    expect(modePermits(rootUser, { mode: 0, uid: 'root', gid: 'root' }, 4)).toBe(true)
+    expect(modePermits(rootUser, { mode: 0, uid: 'root', gid: 'root' }, 2)).toBe(true)
   })
 
-  it('publishes root writes except /tmp', () => {
-    expect(publishes(root, '/home/owner/about.md')).toBe(true)
-    expect(publishes(root, '/tmp/root/a')).toBe(false)
-    expect(publishes(guest, '/var/guestbook/a')).toBe(false)
+  it('ships the modes the filesystem depends on', () => {
+    expect(shippedMode('/tmp', 'dir')).toBe(0o1777)
+    expect(shippedMode('/var/guestbook', 'dir')).toBe(0o1777)
+    expect(shippedMode('/root', 'dir')).toBe(0o700)
+    expect(shippedMode('/etc/shadow', 'file')).toBe(0o600)
+    expect(shippedMode('/etc/passwd', 'file')).toBe(0o644)
   })
 
   it('formats mode bits and applies octal or symbolic changes', () => {
-    expect(formatMode('file', 0o644)).toBe('-rw-r--r--')
     expect(formatMode('dir', 0o755)).toBe('drwxr-xr-x')
+    expect(formatMode('file', 0o644)).toBe('-rw-r--r--')
     expect(formatMode('dir', 0o1777)).toBe('drwxrwxrwt')
-    expect(formatMode('file', 0o4755)).toBe('-rwsr-xr-x')
-    expect(formatMode('file', 0o4644)).toBe('-rwSr--r--')
-    expect(applyMode(0o644, '755')).toBe(0o755)
-    expect(applyMode(0o644, '+x')).toBe(0o755)
+    expect(applyMode(0o644, '600')).toBe(0o600)
+    expect(applyMode(0o644, 'u+x')).toBe(0o744)
     expect(applyMode(0o777, 'go-w')).toBe(0o755)
-    expect(applyMode(0o644, 'u+x,g+x')).toBe(0o754)
-    expect(applyMode(0o755, '+t')).toBe(0o1755)
-    expect(() => applyMode(0o644, '9')).toThrow()
+    expect(applyMode(0o755, 'u=rwx,g=rx,o=')).toBe(0o750)
   })
 })

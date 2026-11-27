@@ -1,0 +1,5 @@
+# /var/backups/shadow.bak
+# 2026-11-02, before the rotation. TODO(adam): stop writing this to the web volume.
+root:qwerty~
+owner:changeme
+ada:rabbit

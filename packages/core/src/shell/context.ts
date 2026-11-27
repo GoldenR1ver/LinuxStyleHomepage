@@ -68,7 +68,10 @@ export interface CommandResult {
 }
 
 export interface ShellCtx {
+  /** The effective identity. A setuid binary elevates this for one command. */
   user: User
+  /** The identity that logged in. `passwd` and `sudo` read this, never `user`. */
+  realUser: User
   cwd: string
   env: Record<string, string>
   aliases: Record<string, string>
@@ -82,4 +85,6 @@ export interface ShellCtx {
   columns: number
   closing: boolean
   line: string
+  /** Run another line in this pane, with this context. Used by sudo and ssh. */
+  reexec?: (line: string) => Promise<CommandResult>
 }

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { ShellCtx } from '../shell/context'
+import { guest } from '../testkit'
 import { Mux } from './mux'
 
 function ctx(): ShellCtx {
   return {
-    user: { name: 'ada', role: 'guest' },
+    user: guest('ada'),
+    realUser: guest('ada'),
     cwd: '/home/owner',
     env: {},
     aliases: {},

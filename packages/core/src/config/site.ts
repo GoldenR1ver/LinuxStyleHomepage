@@ -1,8 +1,8 @@
 /**
- * Machine settings. Keep the about page, projects, and notes in content/.
+ * Machine settings. Accounts, groups and passwords live in `content/etc`,
+ * not here: `/etc/passwd`, `/etc/group` and `/etc/shadow` are the truth.
  *
- * The root password is only a local gate and is shipped in the frontend bundle.
- * Publishing files requires a GitHub token, stored in this browser by `github auth`.
+ * This file only names the machine and the one outbound address a letter uses.
  */
 export interface SiteConfig {
   /** Prompt hostname. Keep it equal to content/etc/hostname. */
@@ -10,17 +10,8 @@ export interface SiteConfig {
   /** Public home directory name, matching content/home/<owner>/. */
   owner: string
   title: string
-  /** Default root password. passwd changes only this browser, not this file. */
-  rootPassword: string
   /** Recipient label included in guestbook mail. */
   email: string
-  github: {
-    owner: string
-    repo: string
-    branch: string
-    /** Directory in the repo that holds the public file tree. */
-    contentRoot: string
-  }
   /**
    * mail push notify URL. POST JSON. Empty means the letter stays in this browser.
    * https only, and not a GitHub host. The mail command cannot replace this URL.
@@ -38,14 +29,7 @@ export const site: SiteConfig = {
   hostname: 'Yujiang Adam Li\'s Homepage',
   owner: 'owner',
   title: 'Yujiang Adam Li\'s Homepage',
-  rootPassword: 'lyj050910!',
   email: '2529319808@qq.com',
-  github: {
-    owner: '',
-    repo: '',
-    branch: 'main',
-    contentRoot: 'content',
-  },
   // Formspree endpoint, confirmed. Empty means mail push only stages the letter.
   // Guests need no account: the browser POSTs JSON here and the form's own
   // recipient address receives the letter.

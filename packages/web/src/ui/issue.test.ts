@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boot } from '@home/core/testkit'
+import { boot, rootUser } from '@home/core/testkit'
 import { expandIssue, readIssue, type IssueFacts } from './issue'
 
 const when = new Date(2026, 10, 9, 14, 5, 6)
@@ -50,8 +50,8 @@ describe('issue', () => {
   })
 
   it('reads /etc/issue and /etc/os-release before login', () => {
-    const { rt } = boot({ user: { name: 'root', role: 'root' } })
-    const root = { name: 'root', role: 'root' as const }
+    const { rt } = boot({ user: rootUser })
+    const root = rootUser
     rt.fs.begin()
     rt.fs.write(root, '/etc/issue', '\\S \\n \\l\n')
     rt.fs.write(root, '/etc/os-release', 'PRETTY_NAME="Home Linux"\n')

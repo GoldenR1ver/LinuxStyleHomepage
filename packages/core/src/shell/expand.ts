@@ -1,4 +1,4 @@
-import { homeDir } from '../kernel/auth'
+import { homeDir } from '../kernel/accounts'
 import type { ShellCtx } from './context'
 import { expandGlob, hasMeta } from './glob'
 import type { Word, WordPart } from './parser'

@@ -14,13 +14,17 @@ import { join, relative, resolve, sep } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
+import { applyAccounts, ROOT } from '@home/core/kernel/accounts'
 import { createShell } from '@home/core/app/session'
 import type { Runtime } from '@home/core/app/runtime'
+import { installProc } from '@home/core/app/system'
+import { runProfile } from '@home/core/app/profile'
 import { site } from '@home/core/config/site'
-import type { DirNode, Node } from '@home/core/kernel/types'
+import type { Node } from '@home/core/kernel/types'
 import { stripLinks } from '@home/core/kernel/text'
+import { buildMetadata } from '@home/core/kernel/perm'
 import { installSystemDirs, VirtualFS } from '@home/core/kernel/vfs'
-import { MemoryMail, MemoryRemote } from '@home/core/remote/memory'
+import { MemoryMail } from '@home/core/remote/memory'
 import { createOutbox } from '@home/core/remote/outbox'
 import type { ShellCtx } from '@home/core/shell/context'
 import type { CommandResult } from '@home/core/shell/context'
@@ -28,12 +32,12 @@ import { runLine } from '@home/core/shell/runner'
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url))
 const CONTENT = resolve(REPO, 'content')
-const TEXT = new Set(['.md', '.txt', '.log', '.json', '.csv', '.html', '.yml', '.yaml', ''])
+const TEXT = new Set(['.md', '.txt', '.log', '.json', '.csv', '.html', '.yml', '.yaml', '.sh', ''])
 
 /** Build the in-memory image from the real content/ tree. The only filesystem glue. */
 function buildImage(dir: string): Map<string, Node> {
-  const image = new Map<string, Node>()
-  image.set('/', dirNode())
+  const shape = new Map<string, { kind: 'file' | 'dir'; abs: string; size: number; mtime: number; text?: string }>()
+  shape.set('/', { kind: 'dir', abs: dir, size: 0, mtime: 0 })
   const visit = (abs: string) => {
     for (const name of readdirSync(abs)) {
       const full = join(abs, name)
@@ -41,31 +45,50 @@ function buildImage(dir: string): Map<string, Node> {
       const rel = relative(dir, full).split(sep).join('/')
       const path = `/${rel}`
       if (stat.isDirectory()) {
-        image.set(path, dirNode(stat.mtimeMs))
+        shape.set(path, { kind: 'dir', abs: full, size: 0, mtime: stat.mtimeMs })
         visit(full)
         continue
       }
-      const text = TEXT.has(extname(name)) && stat.size <= 500_000
-      image.set(path, {
-        type: 'file',
-        content: text ? readFileSync(full, 'utf8').replace(/\r\n/g, '\n') : '',
-        encoding: text ? 'utf8' : 'binary',
-        url: text ? undefined : `file://${full}`,
+      const textual = TEXT.has(extname(name)) && stat.size <= 500_000
+      shape.set(path, {
+        kind: 'file',
+        abs: full,
         size: stat.size,
         mtime: stat.mtimeMs,
-        mode: 0o644,
-        uid: 'root',
-        gid: 'root',
+        text: textual ? readFileSync(full, 'utf8').replace(/\r\n/g, '\n') : undefined,
       })
     }
   }
   visit(dir)
-  installSystemDirs(image)
-  return image
-}
 
-function dirNode(mtime = 0): DirNode {
-  return { type: 'dir', mtime, mode: 0o755, uid: 'root', gid: 'root' }
+  // The same build-time metadata the browser gets from the manifest.
+  const meta = buildMetadata(
+    [...shape].map(([path, node]) => ({ path, kind: node.kind })),
+    (path) => shape.get(path)?.text ?? null,
+  )
+
+  const image = new Map<string, Node>()
+  for (const [path, node] of shape) {
+    const found = meta.get(path) ?? { mode: 0o644, uid: 'root', gid: 'root' }
+    if (node.kind === 'dir') {
+      image.set(path, { type: 'dir', mtime: node.mtime, mode: found.mode, uid: found.uid, gid: found.gid })
+      continue
+    }
+    image.set(path, {
+      type: 'file',
+      content: node.text ?? '',
+      encoding: node.text === undefined ? 'binary' : 'utf8',
+      url: node.text === undefined ? `file://${node.abs}` : undefined,
+      size: node.size,
+      mtime: node.mtime,
+      mode: found.mode,
+      uid: found.uid,
+      gid: found.gid,
+    })
+  }
+  installSystemDirs(image)
+  applyAccounts(image)
+  return image
 }
 
 function extname(name: string): string {
@@ -75,20 +98,11 @@ function extname(name: string): string {
 
 function runtime(): Runtime {
   const fs = new VirtualFS(buildImage(CONTENT))
-  let password = site.rootPassword
   return {
     site,
     fs,
-    remote: new MemoryRemote(false, false),
     mail: new MemoryMail(false),
     outbox: createOutbox(),
-    vault: {
-      get: () => password,
-      set(next: string) {
-        password = next
-      },
-    },
-    tokens: { get: () => '', set() {}, clear() {} },
     persist: async () => {},
     procs: () => [],
     mux: null,
@@ -104,7 +118,7 @@ async function print(result: CommandResult) {
 }
 
 function prompt(ctx: ShellCtx): string {
-  return `${ctx.user.name}@${ctx.env.HOSTNAME ?? 'home'}:${ctx.cwd}$ `
+  return `${ctx.user.name}@${ctx.env.HOSTNAME ?? 'home'}:${ctx.cwd}${ctx.user.uid === 0 ? '#' : '$'} `
 }
 
 async function main() {
@@ -117,8 +131,8 @@ async function main() {
   }
 
   const rt = runtime()
-  const user = { name: 'root', role: 'root' as const }
-  const ctx = createShell(rt, user, cwd)
+  installProc(rt)
+  const ctx = createShell(rt, ROOT, cwd)
   const lines = argv.length ? [argv.join(' ')] : null
 
   if (lines) {
@@ -148,6 +162,8 @@ async function main() {
   }
 
   process.stdout.write(`${site.title}\nType 'help' to start.\n\n`)
+  const profile = await runProfile(ctx)
+  if (profile) process.stdout.write(profile)
   for (;;) {
     process.stdout.write(prompt(ctx))
     const line = await next()

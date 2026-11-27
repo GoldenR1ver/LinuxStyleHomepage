@@ -1,0 +1,6 @@
+root:x:0:
+staff:x:1000:owner,root
+wheel:x:27:owner,root
+ada:x:1001:
+readers:x:1002:ada
+nobody:x:65534:

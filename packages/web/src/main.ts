@@ -1,9 +1,7 @@
-import { createTokenStore } from '@home/core/remote/github'
-import { createGithubRemote } from '@home/core/remote/github'
 import { createMailer } from '@home/core/remote/mail'
 import { createOutbox, restoreDraft } from '@home/core/remote/outbox'
-import { createVault } from '@home/core/kernel/auth'
 import { VirtualFS } from '@home/core/kernel/vfs'
+import type { Entry } from '@home/core/kernel/types'
 import { loadImage } from './content/load'
 import { openStore } from './persist/idb'
 import type { Persisted } from '@home/core/app/store'
@@ -11,15 +9,36 @@ import { site } from '@home/core/config/site'
 import type { Runtime } from '@home/core/app/runtime'
 import { startApp } from './ui/screen'
 import { applyTheme, initialTheme, watchSystemTheme } from './ui/themes'
+import { installProc } from '@home/core/app/system'
 import './ui/app.css'
-import './ui/themes/swiss.css'
-import './ui/themes/terminator.css'
+// Every theme file in the folder ships. Adding a name to THEMES and a file beside
+// this one is the whole change: the glob cannot fall out of step with the list,
+// which an explicit import can (terminator.css was once listed but never bundled).
+import.meta.glob('./ui/themes/*.css', { eager: true })
 
 const app = document.querySelector('#app')
 // Before anything paints: the attribute the theme files key off, and the chrome.
 applyTheme(initialTheme())
-// Keep following the machine until the reader states a preference of their own.
+// Until the reader picks a style, the page follows the machine's light/dark mode.
 watchSystemTheme()
+
+/** v1 kept a `remote` layer for unbuilt commits. Fold it into the local overlay. */
+function legacyLocal(raw: unknown): [string, Entry][] | null {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as {
+    v?: number
+    local?: [string, Entry][]
+    remote?: [string, Entry][]
+  }
+  if (value.v === 2 && Array.isArray(value.local)) return value.local
+  if (value.v === 1) {
+    const merged = new Map<string, Entry>()
+    for (const pair of value.remote ?? []) merged.set(pair[0], pair[1])
+    for (const pair of value.local ?? []) merged.set(pair[0], pair[1])
+    return [...merged.entries()]
+  }
+  return null
+}
 
 try {
   const image = await loadImage()
@@ -31,28 +50,18 @@ try {
   } catch {
     saved = null
   }
-  if (saved?.v === 1) fs.loadOverlay(saved.remote, saved.local)
-  const tokens = createTokenStore(localStorage)
-  const outbox = createOutbox(restoreDraft(saved?.v === 1 ? saved.outbox : null))
+  const local = legacyLocal(saved)
+  if (local) fs.loadOverlay(local)
+  const outbox = createOutbox(restoreDraft(saved?.outbox ?? null))
   const rt: Runtime = {
     site,
     fs,
-    remote: createGithubRemote({
-      owner: site.github.owner,
-      repo: site.github.repo,
-      branch: site.github.branch,
-      contentRoot: site.github.contentRoot,
-      token: () => tokens.get(),
-    }),
     mail: createMailer(site.webhookUrl, site.email),
     outbox,
-    vault: createVault(site.rootPassword, localStorage),
-    tokens,
     persist: async () => {
       await opened.store.save({
-        v: 1,
-        remote: fs.exportLayer('remote'),
-        local: fs.exportLayer('local'),
+        v: 2,
+        local: fs.exportLayer(),
         outbox: outbox.draft,
       })
     },
@@ -60,6 +69,8 @@ try {
     mux: null,
   }
   if (app instanceof HTMLElement) app.replaceChildren()
+  // /proc, the mount table and the tmpfs that is /tmp.
+  installProc(rt)
   startApp(rt, opened.warning)
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err)

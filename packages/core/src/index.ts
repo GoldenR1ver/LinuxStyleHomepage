@@ -15,14 +15,24 @@ export { site, publicHome, mailRelay, mailRelayProblem } from './config/site'
 export type { SiteConfig } from './config/site'
 
 export { VirtualFS, FsError, installSystemDirs } from './kernel/vfs'
-export type { Node, Entry, FileNode, DirNode, Stat, User, RemoteChange } from './kernel/types'
-export { authenticate, createVault, homeDir } from './kernel/auth'
+export type { Node, Entry, FileNode, DirNode, Stat, User } from './kernel/types'
+export {
+  authenticate,
+  applyAccounts,
+  homeDir,
+  lookupUser,
+  parseGroup,
+  parsePasswd,
+  parseShadow,
+  readAccounts,
+  setPassword,
+  verifyPassword,
+} from './kernel/accounts'
+export type { Account, GroupEntry, Login, ShadowEntry } from './kernel/accounts'
 
 export { Mux } from './mux/mux'
 export type { Layout, Pane, SessionHost } from './mux/mux'
 
-export { createGithubRemote, createTokenStore } from './remote/github'
-export type { RemoteRepo, TokenStore } from './remote/github'
 export { createMailer } from './remote/mail'
 export type { Mailer } from './remote/mail'
 export { createOutbox, restoreDraft } from './remote/outbox'

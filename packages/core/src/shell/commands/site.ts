@@ -18,7 +18,9 @@ export const siteCommands: CommandSpec[] = [
     manual:
       'Print the map of this site. Every row is a link: click a directory to list it, a markdown file to render it, a pdf to open it, a text file to read it. The counts come from the file tree, so the map cannot fall behind the content. index runs once after login.',
     run(ctx) {
-      const home = '/home/owner'
+      // The map is derived from the account's home, so every user gets their own
+      // front page and the owner's content is not hard-coded here.
+      const home = ctx.user.home
       const notes = `${home}/notes`
       const rows: string[] = []
       const row = (label: string, path: string, note = '') => {
@@ -115,85 +117,53 @@ export const siteCommands: CommandSpec[] = [
       return { code: stderr ? 1 : 0, stderr, downloads }
     },
   },
-  {
-    name: 'passwd',
-    group: 'site',
-    summary: 'change the root password',
-    usage: 'passwd',
-    manual: 'Changes the password remembered in this browser. site.rootPassword still applies on other devices until you edit that file.',
-    async run(ctx) {
-      if (ctx.user.role !== 'root') return { code: 1, stderr: 'passwd: Permission denied\n' }
-      const first = await ctx.host.askSecret('New password: ')
-      if (first === null) return { code: 130 }
-      const second = await ctx.host.askSecret('Retype password: ')
-      if (second === null) return { code: 130 }
-      if (!first || first !== second) return { code: 1, stderr: 'passwd: password unchanged\n' }
-      ctx.rt.vault.set(first)
-      return { code: 0, stdout: 'root password updated in this browser. Other devices still use site.ts.\n' }
-    },
-  },
-  {
-    name: 'github',
-    group: 'site',
-    summary: 'GitHub credentials',
-    usage: 'github status|auth|logout',
-    manual: 'github auth stores a token in this browser. The token needs Contents read and write. It is not echoed, and it is not written to the repository.',
-    async run(ctx, args) {
-      const sub = args[0] || 'status'
-      if (sub === 'status' && args.length === 1) {
-        const github = ctx.rt.site.github
-        return {
-          code: 0,
-          stdout: [
-            `owner: ${github.owner || '(empty)'}`,
-            `repo: ${github.repo || '(empty)'}`,
-            `branch: ${github.branch}`,
-            `content: ${github.contentRoot}`,
-            `token: ${ctx.rt.tokens.get() ? 'yes' : 'no'}`,
-            `remote: ${ctx.rt.remote.configured ? 'configured' : 'off'} / ${ctx.rt.remote.authenticated ? 'authenticated' : 'anonymous'}`,
-            '',
-          ].join('\n'),
-        }
-      }
-      if (sub === 'auth' && args.length === 1) {
-        const token = await ctx.host.askSecret('GitHub token: ')
-        if (token === null) return { code: 130 }
-        if (!token.trim()) return { code: 1, stderr: 'github: empty token\n' }
-        ctx.rt.tokens.set(token.trim())
-        return { code: 0, stdout: 'token saved in this browser. It is not written to the repository.\n' }
-      }
-      if (sub === 'logout' && args.length === 1) {
-        ctx.rt.tokens.clear()
-        return { code: 0, stdout: 'token cleared\n' }
-      }
-      return { code: 1, stderr: 'github: usage: github status|auth|logout\n' }
-    },
-  },
   mailCommand,
   {
     name: 'tmux',
     group: 'site',
     summary: 'multiplex panes',
     usage: 'tmux <subcommand>',
-    manual: 'Ctrl-b is the prefix. % splits left/right, " splits up/down, arrows move, x closes, c opens a window, n/p switch windows. Keys are also listed by help.',
+    manual:
+      'Ctrl-b is the prefix. % splits left/right, " splits up/down, arrows move, Alt+arrows resizes, x closes, c opens a window, n/p or 0-9 switch.\n\n' +
+      'Subcommands: ls | list-windows | list-panes | split-window [-h] | select-pane -L|-R|-U|-D | resize-pane -L|-R|-U|-D [n] | kill-pane | new-window | next-window | prev-window | rename-window name | kill-window | new -s name | switch -t name | kill-session -t name',
     run(ctx, args) {
       const mux = ctx.rt.mux
       if (!mux) return { code: 1, stderr: 'tmux: not available\n' }
       const sub = args[0] || 'ls'
-      if (sub === 'ls') return { code: 0, stdout: mux.listText() }
+      if (sub === 'ls' || sub === 'list-sessions') return { code: 0, stdout: mux.listText() }
+      if (sub === 'list-windows' || sub === 'lsw') return { code: 0, stdout: mux.windowsText() }
+      if (sub === 'list-panes' || sub === 'lsp') return { code: 0, stdout: mux.panesText() }
       if (sub === 'split-window' || sub === 'splitw') {
         mux.split(args.includes('-h') ? 'h' : 'v')
         return { code: 0 }
       }
       if (sub === 'select-pane') {
-        const flag = args.find((arg) => arg === '-L' || arg === '-R' || arg === '-U' || arg === '-D')
+        const flag = paneFlag(args)
         if (!flag) return { code: 1, stderr: 'tmux: usage: select-pane -L|-R|-U|-D\n' }
-        mux.selectPane(flag.slice(1) as PaneDir)
+        mux.selectPane(flag)
         return { code: 0 }
+      }
+      if (sub === 'resize-pane' || sub === 'resizep') {
+        const flag = paneFlag(args)
+        if (!flag) return { code: 1, stderr: 'tmux: usage: resize-pane -L|-R|-U|-D [cells]\n' }
+        const count = args.find((arg) => /^\d+$/.test(arg))
+        const moved = mux.resizePane(flag, count ? Number(count) : undefined)
+        return { code: moved ? 0 : 1, stderr: moved ? '' : 'tmux: no divider in that direction\n' }
       }
       if (sub === 'kill-pane') {
         const killed = mux.killPane()
         return { code: killed ? 0 : 1, stderr: killed ? '' : 'tmux: cannot kill the last pane\n' }
+      }
+      if (sub === 'kill-window') {
+        const killed = mux.killWindow()
+        return { code: killed ? 0 : 1, stderr: killed ? '' : 'tmux: cannot kill the last window\n' }
+      }
+      if (sub === 'rename-window' || sub === 'renamew') {
+        const name = args[1] ?? ''
+        if (!name) return { code: 1, stderr: 'tmux: usage: rename-window name\n' }
+        return mux.renameWindow(name)
+          ? { code: 0 }
+          : { code: 1, stderr: 'tmux: a window name is 1 to 32 characters on one line\n' }
       }
       if (sub === 'new-window') {
         mux.newWindow()
@@ -206,6 +176,12 @@ export const siteCommands: CommandSpec[] = [
       if (sub === 'prev-window') {
         mux.nextWindow(-1)
         return { code: 0 }
+      }
+      if (sub === 'select-window') {
+        const target = option(args, '-t')
+        if (!/^\d+$/.test(target)) return { code: 1, stderr: 'tmux: usage: select-window -t index\n' }
+        const ok = mux.selectWindow(Number(target))
+        return { code: ok ? 0 : 1, stderr: ok ? '' : `tmux: no window ${target}\n` }
       }
       if (sub === 'new' || sub === 'new-session') {
         const name = option(args, '-s')
@@ -292,6 +268,12 @@ function mimeOf(name: string): string {
 function option(args: string[], flag: string): string {
   const index = args.indexOf(flag)
   return index >= 0 ? args[index + 1] ?? '' : ''
+}
+
+/** `-L`, `-R`, `-U` or `-D` in any position, as a pane direction. */
+function paneFlag(args: string[]): PaneDir | null {
+  const found = args.find((arg) => arg === '-L' || arg === '-R' || arg === '-U' || arg === '-D')
+  return found ? (found.slice(1) as PaneDir) : null
 }
 
 /** Visible names in a directory. A missing or unreadable directory is empty, not an error. */

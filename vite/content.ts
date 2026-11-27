@@ -1,18 +1,34 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Plugin } from 'vite'
+import { buildMetadata } from '../packages/core/src/kernel/perm'
 
-const TEXT = new Set(['.md', '.txt', '.log', '.json', '.csv', '.html', '.yml', '.yaml'])
+const TEXT = new Set(['.md', '.txt', '.log', '.json', '.csv', '.html', '.yml', '.yaml', '.sh'])
 const INLINE_LIMIT = 500_000
 
 /**
  * Treat content/ as the site's root filesystem.
  * Dev reads it from disk. The build emits dist/fs and manifest.json.
- * Nothing outside content/ is published, and the repository carries nothing
- * else that is not needed to build and serve the site.
+ *
+ * The manifest carries the mode, owner and group of every path, computed once
+ * here from `/etc/passwd`, `/etc/group` and `/etc/perm`. A static build stores
+ * bytes, not inode metadata; resolving it at build time is what makes the image
+ * self-describing, the way a tar archive or a squashfs image is. The browser
+ * then loads the tree without re-deriving ownership.
  */
 export function contentPlugin(dir = 'content'): Plugin {
   const root = path.resolve(dir)
+  const manifest = () => {
+    const files = scan(root)
+    const text = new Map<string, string>()
+    for (const file of files) if (file.text !== undefined) text.set(file.path, file.text)
+    const meta = buildMetadata(
+      files.map((file) => ({ path: file.path, kind: file.kind })),
+      (target) => text.get(target) ?? null,
+    )
+    return JSON.stringify({ files: files.map((file) => publicFile(file, meta)) })
+  }
+
   return {
     name: 'content-fs',
     configureServer(server) {
@@ -20,7 +36,7 @@ export function contentPlugin(dir = 'content'): Plugin {
         const url = req.url?.split('?')[0] ?? ''
         if (url === '/fs/manifest.json') {
           res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.end(JSON.stringify({ files: scan(root).map(publicFile) }))
+          res.end(manifest())
           return
         }
         if (!url.startsWith('/fs/')) return next()
@@ -33,12 +49,9 @@ export function contentPlugin(dir = 'content'): Plugin {
     },
     generateBundle() {
       const files = scan(root)
-      this.emitFile({
-        type: 'asset',
-        fileName: 'fs/manifest.json',
-        source: JSON.stringify({ files: files.map(publicFile) }),
-      })
+      this.emitFile({ type: 'asset', fileName: 'fs/manifest.json', source: manifest() })
       for (const file of files) {
+        if (file.kind !== 'file') continue
         this.emitFile({
           type: 'asset',
           fileName: `fs/${file.rel}`,
@@ -53,6 +66,7 @@ interface Scanned {
   abs: string
   rel: string
   path: string
+  kind: 'file' | 'dir'
   size: number
   mtime: number
   encoding: 'utf8' | 'binary'
@@ -68,18 +82,29 @@ function scan(root: string): Scanned[] {
       if (name === '.DS_Store') continue
       const abs = path.join(dir, name)
       const stat = fs.statSync(abs)
+      const rel = path.relative(root, abs).split(path.sep).join('/')
       if (stat.isDirectory()) {
+        out.push({
+          abs,
+          rel,
+          path: `/${rel}`,
+          kind: 'dir',
+          size: 0,
+          mtime: stat.mtimeMs,
+          encoding: 'utf8',
+          url: '',
+        })
         visit(abs)
         continue
       }
       if (!stat.isFile()) continue
-      const rel = path.relative(root, abs).split(path.sep).join('/')
       const encoding = encodingOf(abs, stat.size)
       const text = encoding === 'utf8' ? fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n') : undefined
       out.push({
         abs,
         rel,
         path: `/${rel}`,
+        kind: 'file',
         size: stat.size,
         mtime: stat.mtimeMs,
         encoding,
@@ -92,11 +117,16 @@ function scan(root: string): Scanned[] {
   return out
 }
 
-function publicFile(file: Scanned) {
+function publicFile(file: Scanned, meta: ReturnType<typeof buildMetadata>) {
+  const found = meta.get(file.path) ?? { mode: file.kind === 'dir' ? 0o755 : 0o644, uid: 'root', gid: 'root' }
   return {
     path: file.path,
+    type: file.kind,
     size: file.size,
     mtime: file.mtime,
+    mode: found.mode,
+    uid: found.uid,
+    gid: found.gid,
     encoding: file.encoding,
     text: file.text,
     url: file.url,

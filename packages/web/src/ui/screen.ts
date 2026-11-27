@@ -1,9 +1,8 @@
 import { createShell } from '@home/core/app/session'
 import type { Runtime } from '@home/core/app/runtime'
-import { authenticate, homeDir } from '@home/core/kernel/auth'
+import { authenticate, homeDir, ROOT } from '@home/core/kernel/accounts'
 import { doctor } from '@home/core/kernel/doctor'
 import type { User } from '@home/core/kernel/types'
-import { publicHome } from '@home/core/config/site'
 import { Mux, type Layout, type Pane } from '@home/core/mux/mux'
 import { lookup } from '@home/core/shell/commands'
 import { link } from '@home/core/shell/commands/helpers'
@@ -12,9 +11,21 @@ import { readLanding } from './landing'
 import { shellLoop } from './loop'
 import { TermView } from './term'
 
-const PREFIX_HELP = 'type help\n'
+const PREFIX_HELP = `tmux keys
+  %            split left/right
+  "            split up/down
+  arrows/hjkl  move
+  Alt+arrows   resize
+  x            close pane
+  c            new window
+  &            close window
+  n / p        next / previous window
+  0-9          select window
+
+From the shell: tmux list-windows | list-panes | rename-window name
+`
 /** A path in content/ is read by root, the same identity the build uses. */
-const ROOT_USER: User = { name: 'root', role: 'root' }
+const ROOT_USER: User = ROOT
 
 export function startApp(rt: Runtime, warning = '') {
   const root = document.querySelector('#app')
@@ -66,14 +77,15 @@ export function startApp(rt: Runtime, warning = '') {
     })
     if (mine !== epoch) return
     const hostname = readHostname(rt)
-    const cwd = rt.fs.exists(user, publicHome(rt.site)) ? publicHome(rt.site) : '/'
-    ensureScratch(rt, user)
+    const cwd = rt.fs.exists(user, homeDir(user)) ? homeDir(user) : '/'
+    ensureHome(rt, user)
     const ctx = createShell(rt, user, cwd)
     ctx.env.HOSTNAME = hostname
     const mux = new Mux((from) => {
       if (!from) return ctx
       return {
         user: from.user,
+        realUser: from.realUser,
         cwd: from.cwd,
         env: { ...from.env },
         aliases: { ...from.aliases },
@@ -120,7 +132,7 @@ export function startApp(rt: Runtime, warning = '') {
     void shellLoop(view, pane.ctx, {
       intro: introText,
       onPrompt: () => renderStatus(),
-      onCommand: (line, code) => noteVisit(pane.ctx.user.name, pane.ctx.user.role, line, code),
+      onCommand: (line, code) => noteVisit(pane.ctx.user.name, pane.ctx.user.uid, line, code),
     }).then((reason) => {
       if (mine !== epoch || current !== mux) return
       if (reason === 'closed') return
@@ -167,6 +179,17 @@ export function startApp(rt: Runtime, warning = '') {
     const el = document.createElement('div')
     el.className = `split ${node.t === 'row' ? 'across' : 'stack'}`
     el.append(renderNode(node.a), renderNode(node.b))
+    // The ratio is the first child's share, expressed as flex-grow so the panes
+    // keep sharing whatever space the window has.
+    const first = el.firstElementChild
+    const second = el.lastElementChild
+    if (first instanceof HTMLElement && second instanceof HTMLElement) {
+      first.style.flexGrow = String(node.ratio)
+      second.style.flexGrow = String(1 - node.ratio)
+      // A basis of zero makes flex-grow alone decide the split.
+      first.style.flexBasis = '0'
+      second.style.flexBasis = '0'
+    }
     return el
   }
 
@@ -238,16 +261,29 @@ export function startApp(rt: Runtime, warning = '') {
       return
     }
     const key = event.key
-    if (key === '%') mux.split('h')
-    else if (key === '"') mux.split('v')
-    else if (key === 'ArrowLeft' || key === 'h') mux.selectPane('L')
-    else if (key === 'ArrowRight' || key === 'l') mux.selectPane('R')
-    else if (key === 'ArrowUp' || key === 'k') mux.selectPane('U')
-    else if (key === 'ArrowDown' || key === 'j') mux.selectPane('D')
-    else if (key === 'x') {
+    const resizeBy = event.altKey
+    if (key === '%' && !resizeBy) mux.split('h')
+    else if (key === '"' && !resizeBy) mux.split('v')
+    else if (key === 'ArrowLeft' || key === 'h') {
+      if (resizeBy) mux.resizePane('L')
+      else mux.selectPane('L')
+    } else if (key === 'ArrowRight' || key === 'l') {
+      if (resizeBy) mux.resizePane('R')
+      else mux.selectPane('R')
+    } else if (key === 'ArrowUp' || key === 'k') {
+      if (resizeBy) mux.resizePane('U')
+      else mux.selectPane('U')
+    } else if (key === 'ArrowDown' || key === 'j') {
+      if (resizeBy) mux.resizePane('D')
+      else mux.selectPane('D')
+    } else if (key === 'x') {
       if (!mux.killPane()) activeView()?.print('cannot close the last pane. use exit.\n', 'dim')
     } else if (key === 'c') mux.newWindow()
-    else if (key === 'n') mux.nextWindow(1)
+    else if (key === '&') {
+      if (!mux.killWindow()) activeView()?.print('cannot close the last window\n', 'dim')
+    } else if (key === ',') {
+      activeView()?.print('type: tmux rename-window name\n', 'dim')
+    } else if (key === 'n') mux.nextWindow(1)
     else if (key === 'p') mux.nextWindow(-1)
     else if (key === 'd') activeView()?.print('already attached. there is only one client.\n', 'dim')
     else if (key === '?') activeView()?.print(PREFIX_HELP, 'dim')
@@ -261,8 +297,8 @@ export function startApp(rt: Runtime, warning = '') {
     return views.get(safeActiveId(mux))
   }
 
-  function noteVisit(user: string, role: User['role'], line: string, code: number) {
-    if (!rt.site.reportVisits || role === 'root' || !rt.mail.configured) return
+  function noteVisit(user: string, uid: number, line: string, code: number) {
+    if (!rt.site.reportVisits || uid === 0 || !rt.mail.configured) return
     visits.push(`${new Date().toISOString()} ${user} ${code} ${line}`)
     if (visits.length >= 20) void flushVisits()
   }
@@ -298,13 +334,24 @@ async function login(
       view.print('\n')
       continue
     }
-    const user = authenticate(name.value, password, rt.vault.get())
-    if (!user) {
+    // /etc/passwd is the account list. An unknown name becomes a guest account
+    // in this browser only; an existing one is accepted, except root, which
+    // keeps the one password that matters.
+    const login = authenticate(rt.fs, name.value, password)
+    if (!login) {
       view.print('Login incorrect\n')
       await delay(400)
       continue
     }
-    return user
+    if (login.created) {
+      view.print(`Creating home directory for ${login.user.name}.\n`, 'dim')
+    }
+    try {
+      await rt.persist()
+    } catch {
+      /* a private-mode browser simply forgets the account next time */
+    }
+    return login.user
   }
 }
 
@@ -372,7 +419,7 @@ function intro(rt: Runtime, user: User): string {
   } catch {
     text += `${link('help', 'help')}\n`
   }
-  if (user.role === 'root') {
+  if (user.uid === 0) {
     for (const note of doctor(rt.fs, rt.site)) text += `doctor: ${note}\n`
   }
   return text
@@ -388,8 +435,9 @@ function linkQuotedCommands(text: string): string {
   )
 }
 
-function ensureScratch(rt: Runtime, user: User) {
-  if (user.role === 'root') return
+/** `pam_mkhomedir`: an account with no home gets one, owned by itself. */
+function ensureHome(rt: Runtime, user: User) {
+  if (user.uid === 0) return
   const home = homeDir(user)
   try {
     if (rt.fs.exists(user, home)) return

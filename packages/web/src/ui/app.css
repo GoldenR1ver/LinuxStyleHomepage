@@ -18,6 +18,19 @@
 }
 
 :root {
+  /*
+   * Colour fallbacks, so a page whose theme file failed to load is readable
+   * paper rather than transparent text on an unset background. Every real theme
+   * overrides these; swiss.css sets the same values.
+   */
+  --bg: #ffffff;
+  --fg: #000000;
+  --dim: #6b7280;
+  --rule: #d4d4d4;
+  --surface: #f0f0f0;
+  --status: #ffffff;
+  --link: #0057b8;
+  --accent: #dc143c;
   /* The three faces this page keeps: a serif for display, a sans for prose, a
    * monospace for the terminal. A theme may replace a stack but not the split. */
   --font-display: "Times New Roman", Times, "Liberation Serif", "Noto Serif SC",

@@ -1,0 +1,12 @@
+# /etc/caps — capabilities held by an account that is not uid 0.
+#
+# Format: name:CAP_A,CAP_B
+#
+# uid 0 already holds every capability, so listing root here does nothing. The
+# interesting use is to give one account one power without making it root: a
+# backup account with CAP_DAC_READ_SEARCH can read anything and can change
+# nothing, which is exactly what a backup needs.
+#
+# Examples (keep them commented out unless you want them):
+#   backup:CAP_DAC_READ_SEARCH
+#   auditor:CAP_DAC_OVERRIDE

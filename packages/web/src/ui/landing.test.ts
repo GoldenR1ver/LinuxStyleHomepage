@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { boot } from '@home/core/testkit'
+import { boot, rootUser } from '@home/core/testkit'
 import { readLanding } from './landing'
 
-const root = { name: 'root', role: 'root' as const }
+const root = rootUser
 
 function write(rt: ReturnType<typeof boot>['rt'], path: string, text: string) {
   rt.fs.begin()

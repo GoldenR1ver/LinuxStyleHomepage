@@ -1,7 +1,5 @@
 import type { Runtime } from '@home/core/app/runtime'
-import type { User } from '@home/core/kernel/types'
-
-const ROOT: User = { name: 'root', role: 'root' }
+import { ROOT } from '@home/core/kernel/accounts'
 
 /** Same identity `uname` prints. `\m` is this browser, which `uname -a` does not name. */
 const SYSNAME = 'Linux'

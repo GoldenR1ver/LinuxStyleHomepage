@@ -1,6 +1,21 @@
+/**
+ * One logged-in identity. This is the POSIX credential set, not a role:
+ * the uid decides root (0) and the group names decide the group class.
+ * `login(1)` builds it once from `/etc/passwd` and `/etc/group`.
+ */
 export interface User {
   name: string
-  role: 'root' | 'guest'
+  uid: number
+  gid: number
+  /** Primary group first, then every supplementary group, by name. */
+  groups: string[]
+  home: string
+  shell: string
+  /**
+   * Capabilities beyond the ones every account holds (none). uid 0 holds all of
+   * them and ignores this list. See `kernel/caps.ts`.
+   */
+  caps?: string[]
 }
 
 export interface FileNode {
@@ -31,14 +46,6 @@ export interface Tombstone {
 
 export type Node = FileNode | DirNode
 export type Entry = Node | Tombstone
-
-export interface RemoteChange {
-  /** Absolute virtual filesystem path. */
-  path: string
-  /** null deletes the path from the repository. */
-  content: string | null
-  encoding: 'utf-8' | 'base64'
-}
 
 export interface Stat {
   path: string

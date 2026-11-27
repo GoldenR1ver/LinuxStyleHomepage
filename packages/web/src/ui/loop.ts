@@ -1,6 +1,7 @@
 import type { ShellCtx } from '@home/core/shell/context'
 import { completeLine } from '@home/core/shell/complete'
 import { runLine } from '@home/core/shell/runner'
+import { runProfile } from '@home/core/app/profile'
 import type { CommandResult, Download } from '@home/core/shell/context'
 import { INTRO_MS_MAX } from './ansi'
 import { presentStage } from './present'
@@ -27,6 +28,10 @@ export async function shellLoop(
     }
   }
   if (opts.intro) await view.print(opts.intro, 'out', { maxMs: INTRO_MS_MAX })
+  // /etc/profile, then ~/.profile. A login shell does this once, before the
+  // first prompt, and so does this one.
+  const profile = await runProfile(ctx)
+  if (profile) await view.print(profile)
   while (!ctx.closing) {
     ctx.columns = view.columns()
     opts.onPrompt?.()

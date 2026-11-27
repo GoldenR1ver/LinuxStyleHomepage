@@ -1,0 +1,17 @@
+# /etc/profile — read by every login shell, once.
+#
+# These are ordinary shell lines, so `export`, `alias`, a function definition and
+# `umask` all work. A line that fails prints its error and the rest still runs.
+
+umask 022
+
+export EDITOR=vim
+export PAGER=less
+export LANG=C.UTF-8
+
+alias grep='grep -n'
+alias df='df -h'
+
+# A prompt-free way to see what this machine is. This shell takes a function
+# definition on one line, so the body is separated by semicolons.
+sysinfo() { uname -a; echo; id; echo; mount; }

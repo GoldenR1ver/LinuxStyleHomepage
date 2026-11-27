@@ -1,5 +1,5 @@
 import { stripLinks } from '@home/core/kernel/text'
-import { homeDir } from '@home/core/kernel/auth'
+import { homeDir } from '@home/core/kernel/accounts'
 import type { ShellCtx, PickOptions, PickedFile } from '@home/core/shell/context'
 import { MOTION_MS_MAX, parseLines, revealDuration, revealSchedule, typedIndex, type Line as TextLine, type Span, type TypedRun } from './ansi'
 import { currentTheme, setTheme, autoTheme, THEMES } from './themes'
@@ -63,7 +63,7 @@ export class TermView {
   private history: string[] = []
   private hist = -1
   private draft = ''
-  private pagerLines: string[] = []
+  private pagerLines: TextLine[] = []
   private pagerTop = 0
   /** Set while a typed reveal is running, so any key can end it. */
   private animating: (() => void) | null = null
@@ -354,7 +354,8 @@ export class TermView {
   pager(text: string): Promise<void> {
     this.mode = 'pager'
     const plain = stripLinks(text)
-    this.pagerLines = plain.length ? plain.replace(/\n$/, '').split('\n') : ['']
+    // Color is kept: a file may carry SGR, and help highlights its headings.
+    this.pagerLines = parseLines(plain.length ? plain.replace(/\n$/, '') : '')
     this.pagerTop = 0
     this.pagerEl.hidden = false
     this.input.value = ''
@@ -505,7 +506,7 @@ export class TermView {
     const slice = this.pagerLines.slice(this.pagerTop, this.pagerTop + page)
     const end = this.pagerTop + page >= this.pagerLines.length
     this.pagerEl.replaceChildren()
-    for (const line of slice) this.appendPlain(this.pagerEl, line)
+    for (const line of slice) this.appendPagerLine(line)
     const status = document.createElement('div')
     status.className = 'dim'
     status.textContent = end
@@ -652,10 +653,12 @@ export class TermView {
     }
   }
 
-  private appendPlain(parent: HTMLElement, text: string) {
-    const line = document.createElement('div')
-    line.textContent = text || '\u00a0'
-    parent.append(line)
+  /** One pager row, with the same color spans the scroll uses. Links stay inert here. */
+  private appendPagerLine(line: TextLine) {
+    const row = document.createElement('div')
+    if (!line.spans.length) row.append(document.createTextNode('\u00a0'))
+    for (const part of line.spans) row.append(renderPart(part))
+    this.pagerEl.append(row)
   }
 
   private focusIfActive() {
@@ -706,7 +709,7 @@ export function promptParts(ctx: ShellCtx): Prompt {
     user: ctx.user.name,
     host: ctx.columns && ctx.columns < 52 ? 'home' : host,
     cwd,
-    sig: ctx.user.role === 'root' ? '#' : '$',
-    root: ctx.user.role === 'root',
+    sig: ctx.user.uid === 0 ? '#' : '$',
+    root: ctx.user.uid === 0,
   }
 }

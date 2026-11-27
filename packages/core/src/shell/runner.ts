@@ -1,6 +1,8 @@
 import { FsError } from '../kernel/vfs'
+import { lookupUser } from '../kernel/accounts'
 import { resolve } from '../kernel/path'
 import { stripLinks } from '../kernel/text'
+import type { User } from '../kernel/types'
 import { lookup } from './commands'
 import type { ShellCtx } from './context'
 import { expandAlias, expandWord } from './expand'
@@ -31,6 +33,7 @@ export async function runLine(line: string, ctx: ShellCtx): Promise<CommandResul
     return define(ctx, definition.name, definition.body)
   }
   ctx.line = line
+  ctx.reexec = (next) => runLine(next, ctx)
   let parsed
   try {
     parsed = parse(expandAlias(line, ctx.aliases))
@@ -65,7 +68,9 @@ async function runList(items: ListItem[], ctx: ShellCtx, depth: number, budget: 
     const result = await runPipeline(item.pipeline.segments, ctx, depth, budget, incoming)
     first = false
     code = result.code
-    stdout = result.stdout ?? ''
+    // `a; b` prints both, the way a shell does. A pipe only ever returns the
+    // last segment's output, so this cannot duplicate a pipeline's text.
+    stdout += result.stdout ?? ''
     stderr += result.stderr ?? ''
     clear = clear || Boolean(result.clear)
     logout = logout || Boolean(result.logout)
@@ -108,7 +113,9 @@ async function runPipeline(
     result = await runSegment(segment, ctx, incoming, piped, depth, budget)
     stderr += result.stderr ?? ''
     // A link is a screen affordance, not data: a pipe must see the bare text.
-    incoming = result.pager !== undefined ? '' : stripLinks(result.stdout ?? '')
+    // A pager is the screen form of text, so a pipe after it reads that text.
+    // stdout may be an empty string, so test it rather than coalescing.
+    incoming = stripLinks(result.stdout || result.pager || '')
     if (result.logout || result.exitPane) break
   }
   return { ...result, stderr }
@@ -167,7 +174,15 @@ async function runSegment(
       }
       stdin = text
     }
-    const result = await spec.run(ctx, args.slice(1), stdin)
+    const elevated = execIdentity(ctx, name)
+    const previous = ctx.user
+    let result
+    try {
+      if (elevated) ctx.user = elevated
+      result = await spec.run(ctx, args.slice(1), stdin)
+    } finally {
+      if (elevated) ctx.user = previous
+    }
     if ((result.code ?? 0) !== 0) {
       ctx.rt.fs.abort()
       return result
@@ -180,6 +195,30 @@ async function runSegment(
     const text = message(err)
     return { code: err instanceof FsError ? 1 : 1, stderr: text.startsWith('sh:') ? ensureNl(text) : `sh: ${ensureNl(text)}` }
   }
+}
+
+/**
+ * The identity a command runs with. A setuid executable at `PATH/<name>` hands
+ * the process the file owner's uid and drops the supplementary groups, the way
+ * execve(2) does; every other command runs as the login user. `ctx.realUser`
+ * still remembers who typed the line.
+ */
+function execIdentity(ctx: ShellCtx, name: string): User | null {
+  for (const dir of (ctx.env.PATH ?? '/bin').split(':').filter(Boolean)) {
+    const path = `${dir}/${name}`
+    let stat
+    try {
+      stat = ctx.rt.fs.stat(ctx.user, path)
+    } catch {
+      continue
+    }
+    if (stat.type !== 'file') continue
+    if ((stat.mode & 0o4000) === 0 || (stat.mode & 0o111) === 0) continue
+    if (stat.uid === ctx.user.name) continue
+    const owner = lookupUser(ctx.rt.fs, stat.uid)
+    if (owner) return owner
+  }
+  return null
 }
 
 /** Run a stored body with $1..$9, $# and $@ bound to the call's arguments. */
@@ -264,11 +303,20 @@ function applyRedirects(ctx: ShellCtx, segment: Segment, result: CommandResult):
     stderr = ''
   }
   const outputTarget = output[output.length - 1]
+  let pager = result.pager
   if (outputTarget) {
-    writeFile(ctx.rt.fs, ctx.user, onePath(ctx, outputTarget.target), stripLinks(stdout), outputTarget.op === '>>')
+    // A redirect is not a screen: the page becomes text, as less behaves when it is not on a terminal.
+    writeFile(
+      ctx.rt.fs,
+      ctx.user,
+      onePath(ctx, outputTarget.target),
+      stripLinks(stdout + (pager ?? '')),
+      outputTarget.op === '>>',
+    )
     stdout = ''
+    pager = undefined
   }
-  return { ...result, stdout, stderr }
+  return { ...result, stdout, stderr, pager }
 }
 
 function onePath(ctx: ShellCtx, word: Word): string {
